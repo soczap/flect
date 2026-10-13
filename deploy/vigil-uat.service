@@ -32,3 +32,4 @@ MemorySwapMax=0
 
 [Install]
 WantedBy=default.target
+# Not enabled at boot: Flect starts UAT on demand (deploy / tests / VAPT) and stops it afterwards.

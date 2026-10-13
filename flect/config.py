@@ -39,6 +39,8 @@ DEFAULTS: dict = {
         "uat_dir": "~/VIGIL-uat",
         "uat_data_dir": "~/VIGIL-uat-data",
         "uat_unit": "vigil-uat.service",
+        # UAT runs only while Flect deploys/tests/scans it, then stops: memory is shared with the 104 GB model.
+        "uat_on_demand": True,
         "uat_url": "https://127.0.0.1:8190",
         "venv": "~/VIGIL/.venv",
         "logs": ["~/VIGIL/data/logs/vigil.log", "~/VIGIL/data/logs/service.out"],

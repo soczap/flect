@@ -116,3 +116,20 @@ def test_env_scan_registers_only_secret_settings(tmp_path):
     jwt_in_env_file(str(env))
     out = redact.redact("url https://127.0.0.1:8000 port 8090 secret abcdef123456789xyz")
     assert "https://127.0.0.1:8000" in out and "8090" in out and "abcdef123456789xyz" not in out
+
+
+def test_uat_stops_after_deploy_when_on_demand(cfg, db):
+    from flect.actuators.deploy import DeployResult
+    db.set("mode:cicd", "enforce")
+
+    class UAT:
+        stopped = 0
+        def deploy(self, sha, verify_s=60):
+            return DeployResult(True, sha, "a" * 40, "healthy")
+        def stop(self):
+            UAT.stopped += 1
+            return True
+    e = Engine(cfg, db, uat=UAT())
+    run(e.on_branch_move("uat", "a" * 40, "b" * 40))
+    assert UAT.stopped == 1
+    assert db.one("SELECT env, state FROM deployments") == {"env": "uat", "state": "healthy"}

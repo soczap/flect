@@ -122,6 +122,11 @@ class CicdFlows:
             await self.deploy_prod(new, "human_merge", "cicd")
         elif branch == gh["feature_base"]:
             await self.deploy_uat(new)
+            await self.stop_uat_if_on_demand()
+
+    async def stop_uat_if_on_demand(self) -> None:
+        if self.uat is not None and self.cfg["target"].get("uat_on_demand", True) and not self.deploy_lock["uat"].locked():
+            await asyncio.to_thread(self.uat.stop)
 
     async def deploy_uat(self, sha: str):
         if self.uat is None:
@@ -165,3 +170,4 @@ class CicdFlows:
                                                  "success" if report.passed() else "failure",
                                                  f"VAPT {'passed' if report.passed() else 'failed'}: max {report.max_severity()}"),
                        github_write=True)
+        await self.stop_uat_if_on_demand()
