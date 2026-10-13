@@ -16,6 +16,7 @@ from pathlib import Path
 ACCESS_RE = re.compile(
     r'^\[?(?P<ip>[0-9A-Fa-f:.]+?)\]?:(?P<port>\d+) - "(?P<method>[A-Z]+) (?P<path>\S+)[^"]*" (?P<status>\d{3})')
 MAX_LINE = 64 * 1024
+REPLAY_LIMIT = 256 * 1024     # bytes; larger files are never replayed from offset 0
 
 
 @dataclass
@@ -64,6 +65,12 @@ class FileFollower:
         self.start_at_end = start_at_end
         self._partial = ""
 
+    def _restart_offset(self, size: int) -> int:
+        """A fresh/rotated/truncated file is read from the start only while it is small. A large file whose
+        size moved backwards (e.g. an unclean shutdown dropped unflushed data) is resumed at the end, so old
+        history is never replayed as if it were live traffic."""
+        return 0 if size <= REPLAY_LIMIT else size
+
     def cursor(self) -> dict:
         return {"inode": self.inode, "offset": self.offset}
 
@@ -75,10 +82,13 @@ class FileFollower:
         if self.inode != st.st_ino:                 # first run or rotated
             first_run = self.inode is None and self.offset is None
             self.inode = st.st_ino
-            self.offset = st.st_size if (first_run and self.start_at_end) else 0
+            if first_run and self.start_at_end:
+                self.offset = st.st_size
+            else:
+                self.offset = self._restart_offset(st.st_size)
             self._partial = ""
-        if self.offset is None or st.st_size < self.offset:   # truncated
-            self.offset = 0
+        if self.offset is None or st.st_size < self.offset:   # truncated, or data lost in an unclean shutdown
+            self.offset = self._restart_offset(st.st_size)
             self._partial = ""
         if st.st_size == self.offset:
             return []

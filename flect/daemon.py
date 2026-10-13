@@ -70,25 +70,33 @@ class Flect:
         self.poller = GitHubPoller(self.db, gh["repo"], gh["poll_interval_s"], self.engine.on_pr, self.engine.on_branch_move)
         self.pending: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self.started = time.time()
+        self.stale_skipped = 0
         self.tasks: list[asyncio.Task] = []
 
     # ── log records (called from the tailer thread) ────────────────────────
+    STALE_S = 120
+
     @staticmethod
-    def _event_time(rec) -> float:
-        """Prefer the log line's own timestamp (robust to batched reads); fall back to arrival time."""
+    def _event_time(rec) -> float | None:
+        """The log line's own timestamp, or arrival time when it has none. Returns None for stale lines
+        (older than STALE_S): detectors must only ever see live events, never replayed history."""
         now_t = time.time()
         if rec.ts:
             try:
                 from datetime import datetime
                 t = datetime.fromisoformat(str(rec.ts).replace("Z", "+00:00")).timestamp()
-                if abs(now_t - t) < 300:
-                    return t
             except ValueError:
-                pass
+                return now_t
+            if now_t - t > Flect.STALE_S:
+                return None
+            return min(t, now_t)
         return now_t
 
     def _on_record(self, rec) -> None:
         t = self._event_time(rec)
+        if t is None:
+            self.stale_skipped += 1
+            return
         if rec.kind == "access" and rec.ip:
             self.dos.observe(rec.ip, rec.path or "", rec.method or "", rec.status or 0, t)
             for a in self.anomaly.observe_access(rec.status or 0, t):
@@ -175,9 +183,11 @@ class Flect:
             try:
                 results = await asyncio.to_thread(keys_src.run_all, self.cfg)
                 await self.engine.on_key_results(results)
+                retry = any(r.probe_ok is False for r in results)
             except Exception:  # noqa: BLE001
                 log.exception("key checks failed")
-            await asyncio.sleep(self.cfg["keys"]["interval_s"])
+                retry = True
+            await asyncio.sleep(120 if retry else self.cfg["keys"]["interval_s"])
 
     async def _housekeeping(self) -> None:
         while True:
@@ -189,6 +199,7 @@ class Flect:
                 "llm": "ok" if await asyncio.to_thread(self.gateway.client.health) else "unavailable",
                 "github_poll": self.poller.last_error or "ok",
                 "log_lines": self.tailer.lines_seen,
+                "stale_lines_skipped": self.stale_skipped,
                 "llm_queue": self.gateway.stats(),
                 "updated": now(),
             })

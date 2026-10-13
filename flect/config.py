@@ -49,7 +49,7 @@ DEFAULTS: dict = {
         "per_ip_rps": 20.0,
         "per_ip_sustain_s": 10,
         "failed_logins_per_min": 50,
-        "distinct_paths_per_min": 200,
+        "failed_paths_per_min": 60,
         "global_flood_factor": 5.0,
         "global_min_rps": 50.0,
         "ttl_ladder": ["15m", "1h", "24h"],

@@ -140,8 +140,16 @@ class Engine(CrashFlows, CicdFlows):
         cert_warn = self.cfg["keys"]["cert_warn_days"]
         for st in results:
             days = st.days_left()
-            level = rules.key_alert_level(st.kind, days, st.probe_ok, warn, cert_warn)
+            fails = (self.db.get(f"keyfail:{st.name}") or 0) + 1 if st.probe_ok is False else 0
+            self.db.set(f"keyfail:{st.name}", fails)
             prev = self.db.one("SELECT alert_level FROM keys WHERE name=?", (st.name,))
+            if st.probe_ok is False and fails < 2:
+                # One failed probe (e.g. DNS not up yet at boot) is not an outage; Flect re-checks in 2 minutes.
+                level = (prev or {}).get("alert_level") or "ok"
+                if level == "failing":
+                    level = "ok"
+            else:
+                level = rules.key_alert_level(st.kind, days, st.probe_ok, warn, cert_warn)
             self.db.execute(
                 "INSERT INTO keys(name,kind,location,expires_ts,days_left,last_probe_ts,last_probe_ok,alert_level,details) "
                 "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET kind=excluded.kind, location=excluded.location, "
@@ -150,7 +158,7 @@ class Engine(CrashFlows, CicdFlows):
                 (st.name, st.kind, st.location, st.expires.isoformat() if st.expires else None, days, now(),
                  None if st.probe_ok is None else int(st.probe_ok), level, st.details))
             if st.kind == "github_pat":
-                if level == "expired" or st.probe_ok is False:
+                if level in ("expired", "failing"):
                     self.set_paused(f"GitHub token {'expired' if level == 'expired' else 'not working'}")
                 elif (self.writes_paused() or "").startswith("GitHub token"):
                     self.set_paused(None)

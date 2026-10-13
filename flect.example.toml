@@ -31,3 +31,4 @@ allowlist = ["127.0.0.0/8", "::1/128", "192.168.7.0/24", "100.87.127.50/32", "fd
 per_ip_rps = 20.0
 per_ip_sustain_s = 10
 failed_logins_per_min = 50
+failed_paths_per_min = 60       # distinct 400/403/404/405 paths per IP per minute (scanner signature)

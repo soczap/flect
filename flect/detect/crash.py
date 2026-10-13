@@ -93,6 +93,8 @@ class CrashDetector:
         self.last_tb: Traceback | None = None
         self.down = False
         self.stopped = False
+        self.last_pid: int | None = None
+        self.grace_until = 0.0
 
     def observe_traceback(self, text: str, t: float) -> CrashEvent | None:
         tb = parse_traceback(text, self.app_dir)
@@ -127,7 +129,18 @@ class CrashDetector:
             return None
         if self.stopped and probe.http_ok:
             self.stopped = False
-        self.consecutive_failures = 0 if probe.http_ok else self.consecutive_failures + 1
+        # A new main PID means the service (or the whole host) just (re)started: give it time to load
+        # before failed health probes count. Crash loops are still caught by the restart-loop rule.
+        pid = getattr(probe, "main_pid", None)
+        if pid and pid != self.last_pid:
+            self.grace_until = t + self.cfg.get("startup_grace_s", 90)
+            self.consecutive_failures = 0
+            self.last_pid = pid
+        in_grace = t < self.grace_until
+        if probe.http_ok or in_grace:
+            self.consecutive_failures = 0
+        else:
+            self.consecutive_failures += 1
         if self.stopped:
             return None          # still starting back up after a deliberate stop
         reasons = []

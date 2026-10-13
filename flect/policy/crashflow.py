@@ -107,7 +107,7 @@ class CrashFlows:
             self.db.update_incident(incident_id, state="mitigating")
             await self.mitigate(incident_id)
         if event.classification == "code" and tb and tb.app_frames:
-            asyncio.create_task(self.fix_forward(incident_id, tb, crashed_sha), name=f"fix-forward-{incident_id}")
+            asyncio.create_task(self._fix_forward_safe(incident_id, tb, crashed_sha), name=f"fix-forward-{incident_id}")
 
     async def mitigate(self, incident_id: int, allow_rollback: bool = True) -> None:
         """Step A — save production without the LLM: roll back to last-known-good, else restart."""
@@ -129,6 +129,13 @@ class CrashFlows:
             self.db.update_incident(incident_id, state="mitigated", summary="Restarted the service; health is green.")
 
     # ── fix-forward ────────────────────────────────────────────────────────
+    async def _fix_forward_safe(self, incident_id: int, tb, crashed_sha: str) -> None:
+        try:
+            await self.fix_forward(incident_id, tb, crashed_sha)
+        except Exception as exc:  # noqa: BLE001 — record on the incident instead of losing it
+            log.exception("fix-forward for incident %s failed", incident_id)
+            self.db.update_incident(incident_id, summary=f"Fix-forward error: {type(exc).__name__}: {exc}"[:400])
+
     async def fix_forward(self, incident_id: int, tb, crashed_sha: str) -> None:
         if self.mode("crash") == "off":
             return

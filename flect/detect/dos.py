@@ -3,7 +3,8 @@
 Rules (thresholds from config [dos]):
   DOS-RATE-001   one IP sustains > per_ip_rps for per_ip_sustain_s seconds
   DOS-AUTH-001   one IP produces > failed_logins_per_min failed logins (401/429 on /api/auth/login)
-  DOS-SCAN-001   one IP requests > distinct_paths_per_min distinct paths in a minute
+  DOS-SCAN-001   one IP gets > failed_paths_per_min distinct paths answered 400/403/404/405 in a minute
+                 (scanners probe paths that do not exist; normal browsing is mostly 2xx/3xx)
   DOS-FLOOD-001  total request rate > global_flood_factor x its EWMA baseline (and > global_min_rps);
                  while flooding, per-IP thresholds are divided by 4 so the top talkers get caught.
 No LLM in this path. The allowlist always wins.
@@ -15,6 +16,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 LOGIN_PATH = "/api/auth/login"
+SCAN_STATUSES = {400, 403, 404, 405}
 
 
 @dataclass
@@ -59,7 +61,8 @@ class DosDetector:
             self.ignored_allowlisted += 1
             return
         self.hits[ip].append(t)
-        self.paths[ip].append((t, path))
+        if status in SCAN_STATUSES:
+            self.paths[ip].append((t, path))
         if path == LOGIN_PATH and method == "POST" and status in (401, 429):
             self.fails[ip].append(t)
 
@@ -89,9 +92,9 @@ class DosDetector:
                                       {"failed_logins": fails}, t))
                 continue
             distinct = len({p for _, p in self.paths.get(ip, ())})
-            if distinct > self.cfg["distinct_paths_per_min"] / divisor:
-                out.append(self._flag(ip, "DOS-SCAN-001", f"{distinct} distinct paths in 60s",
-                                      {"distinct_paths": distinct}, t))
+            if distinct > self.cfg["failed_paths_per_min"] / divisor:
+                out.append(self._flag(ip, "DOS-SCAN-001", f"{distinct} distinct failed paths (4xx) in 60s",
+                                      {"failed_distinct_paths": distinct}, t))
         return out
 
     def snapshot(self, top: int = 10) -> dict:
