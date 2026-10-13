@@ -175,7 +175,7 @@ class Flect:
                 for row in self.db.all("SELECT id FROM incidents WHERE kind='crash' AND dedupe_key='crash:down' "
                                        "AND state IN ('mitigated','open','mitigating')"):
                     if time.time() > self.engine.deploying_until:
-                        self.db.update_incident(row["id"], state="resolved")
+                        self.engine.resolve_incident(row["id"], "Production is healthy again.")
             await asyncio.to_thread(self.engine.track_prod_version, p.http_ok)
             await asyncio.sleep(self.cfg["crash"]["health_interval_s"])
 

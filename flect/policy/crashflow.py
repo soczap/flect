@@ -219,8 +219,7 @@ class CrashFlows:
         self.db.set(f"gh:head:{prod_branch}", main_sha)      # this deploy is ours; the poller must not redo it
         res = await self.deploy_prod(main_sha, "hotfix", "crash", incident_id)
         if res is not None and res.ok:
-            self.db.update_incident(incident_id, state="resolved",
-                                    summary=f"Hotfix PR #{number} merged and deployed ({main_sha[:12]}).")
+            self.resolve_incident(incident_id, f"Hotfix PR #{number} merged and deployed ({main_sha[:12]}).")
             if self.cfg["github"]["feature_base"] != prod_branch:
                 await self.act("cicd", "open_backmerge_pr", self.cfg["github"]["feature_base"], {"from": prod_branch},
                                lambda: asyncio.to_thread(self.github.create_pr, self.cfg["github"]["feature_base"],

@@ -77,6 +77,12 @@ class Engine(CrashFlows, CicdFlows):
                                   incident_id)
             return None
 
+    def resolve_incident(self, incident_id: int, summary: str) -> None:
+        """Resolve locally and, if it was filed on GitHub, comment and close the issue."""
+        self.db.update_incident(incident_id, state="resolved", summary=summary)
+        if self.notifier:
+            self.notifier.resolved(incident_id, summary)
+
     # ── DoS ────────────────────────────────────────────────────────────────
     async def on_block_request(self, req) -> None:
         offence = rules.offence_count(self.db, req.ip) + 1
@@ -145,9 +151,8 @@ class Engine(CrashFlows, CicdFlows):
             prev = self.db.one("SELECT alert_level FROM keys WHERE name=?", (st.name,))
             if st.probe_ok is False and fails < 2:
                 # One failed probe (e.g. DNS not up yet at boot) is not an outage; Flect re-checks in 2 minutes.
+                # Keep the previous level (including "failing"): debounce applies to new outages only.
                 level = (prev or {}).get("alert_level") or "ok"
-                if level == "failing":
-                    level = "ok"
             else:
                 level = rules.key_alert_level(st.kind, days, st.probe_ok, warn, cert_warn)
             self.db.execute(
@@ -178,4 +183,4 @@ class Engine(CrashFlows, CicdFlows):
             elif changed and level == "ok":
                 for row in self.db.all("SELECT id FROM incidents WHERE kind='expiry' AND state!='resolved' AND title LIKE ?",
                                        (f"{st.name}:%",)):
-                    self.db.update_incident(row["id"], state="resolved")
+                    self.resolve_incident(row["id"], f"{st.name} is healthy again ({st.details or 'probe ok'}).")

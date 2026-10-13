@@ -126,6 +126,12 @@ class GitHub:
         m = re.search(r"/issues/(\d+)", res.stdout)
         return int(m.group(1)) if m else None
 
+    def close_issue(self, number: int, comment: str | None = None) -> bool:
+        args = ["gh", "issue", "close", str(number), "--repo", self.repo]
+        if comment:
+            args += ["--comment", comment]
+        return subprocess.run(args, capture_output=True, text=True, timeout=60, check=False).returncode == 0
+
     def close_pr(self, number: int, comment: str | None = None) -> bool:
         args = ["gh", "pr", "close", str(number), "--repo", self.repo]
         if comment:

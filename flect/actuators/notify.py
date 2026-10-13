@@ -40,3 +40,11 @@ class Notifier:
         if not (self.github_enabled and self.github) or self.paused():
             return False
         return self.github.comment(number, redact(body))
+
+    def resolved(self, incident_id: int, summary: str) -> bool:
+        """Comment on and close the incident's GitHub issue, if one was filed."""
+        row = self.db.one("SELECT github_issue FROM incidents WHERE id=?", (incident_id,))
+        number = row["github_issue"] if row else None
+        if not (number and self.github_enabled and self.github) or self.paused():
+            return False
+        return self.github.close_issue(number, f"✅ Resolved by Flect: {redact(summary)}")

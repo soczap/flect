@@ -97,3 +97,31 @@ def test_restart_grace_period(cfg):
     for t in (95, 100):
         assert P(False, 111, t) is None
     assert P(False, 111, 105).severity == "S1"       # a real outage after it came up
+
+
+def test_failing_service_stays_failing_without_duplicate_incidents(cfg, db):
+    e = Engine(cfg, db)
+    down = KeyStatus("frs-backend", "service", "https://127.0.0.1:8000/", None, False, "SSLEOFError")
+    for _ in range(2):
+        asyncio.run(e.on_key_results([down]))
+    assert db.one("SELECT COUNT(*) n FROM incidents")["n"] == 1
+    db.set("keyfail:frs-backend", 0)                    # e.g. counter lost across a code upgrade
+    for _ in range(3):
+        asyncio.run(e.on_key_results([down]))
+    assert db.all("SELECT state FROM incidents") == [{"state": "open"}]
+
+
+def test_recovery_closes_github_issue(cfg, db, tmp_path):
+    from flect.actuators.notify import Notifier
+
+    class GH:
+        closed = []
+        def open_issue(self, title, body, labels): return 7
+        def close_issue(self, number, comment): GH.closed.append(number); return True
+
+    e = Engine(cfg, db, notifier=Notifier(db, tmp_path / "r", GH(), True))
+    down = KeyStatus("ollama", "service", "http://127.0.0.1:11434/api/tags", None, False, "refused")
+    asyncio.run(e.on_key_results([down])); asyncio.run(e.on_key_results([down]))
+    up = KeyStatus("ollama", "service", "http://127.0.0.1:11434/api/tags", None, True, "status 200")
+    asyncio.run(e.on_key_results([up]))
+    assert GH.closed == [7] and db.one("SELECT state FROM incidents")["state"] == "resolved"
