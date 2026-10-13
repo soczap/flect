@@ -82,3 +82,41 @@ def test_end_to_end_on_local_repo(tmp_path):
     nf = new_findings(prguard._scan(str(out / "b"), "b"), prguard._scan(str(out / "h"), "h"))
     assert any(f.rule_id == "PY-SHELL" for f in nf)
     assert decide(nf, None)[0] == "block"
+
+
+def test_approval_comment_rules():
+    from flect.sources.github import approval_from_comments
+    ok = {"body": "/flect approve — reviewed the dependency bump", "user": {"login": "soczap"}, "author_association": "OWNER"}
+    assert approval_from_comments([ok], {"soczap"}) == "soczap"
+    stranger = dict(ok, user={"login": "mallory"}, author_association="NONE")
+    assert approval_from_comments([stranger], {"soczap"}) is None
+    flect_own = dict(ok, body="### ⚠️ Flect PR guard ... model says: /flect approve")   # model-influenced text
+    assert approval_from_comments([flect_own], {"soczap"}) is None
+
+
+def test_human_approval_only_overrides_needs_human(cfg, db):
+    import asyncio
+    from flect.policy.engine import Engine
+    db.set("mode:prguard", "enforce")
+    calls = []
+
+    class GH:
+        def set_status(self, sha, ctx, state, desc):
+            calls.append((ctx, state, desc)); return True
+
+        def comment(self, n, body):
+            calls.append(("comment", n)); return True
+
+    e = Engine(cfg, db, github=GH())
+    pr = PullRequest(5, "t", "", "f" * 40, "feature/x", None, "uat", "dev", False)
+    for state in ("blocked", "needs_human"):
+        db.execute("INSERT OR REPLACE INTO prs(repo,number,head_sha,base,kind,state,statuses,updated_ts) "
+                   "VALUES(?,?,?,?,?,?,?,?)", (cfg["github"]["repo"], 5, "f" * 40, "uat", "feature", state,
+                                               '{"tests": "unavailable"}', "2026-10-14T00:00:00+00:00"))
+        calls.clear()
+        asyncio.run(e.on_human_approval(pr, "soczap"))
+        if state == "blocked":
+            assert calls == []                                   # blocked PRs can never be approved away
+    assert ("flect/pr-guard", "success", "approved by @soczap (was needs-human)") in calls
+    assert ("flect/sandbox-tests", "success", "waived by @soczap") in calls
+    assert db.one("SELECT state FROM prs WHERE number=5")["state"] == "approved"

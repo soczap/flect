@@ -55,13 +55,28 @@ def parse_pulls(body: str) -> list[PullRequest]:
     return out
 
 
+def approval_from_comments(comments: list[dict], approvers: set[str]) -> str | None:
+    """Return the approver's login if a comment *starts with* `/flect approve`. Flect's own comments (also
+    posted as soczap) always start with a heading, so model-influenced text can never trigger this."""
+    for c in comments:
+        text = (c.get("body") or "").strip()
+        login = (c.get("user") or {}).get("login")
+        if text.lower().startswith("/flect approve") and login in approvers \
+                and c.get("author_association") in ("OWNER", "MEMBER", "COLLABORATOR"):
+            return login
+    return None
+
+
 class GitHubPoller:
-    def __init__(self, db, repo: str, interval: float, on_pr, on_branch_move=None):
+    def __init__(self, db, repo: str, interval: float, on_pr, on_branch_move=None, on_approve=None,
+                 approvers: list[str] | None = None):
         self.db = db
         self.repo = repo
         self.interval = interval
         self.on_pr = on_pr                  # async callback(PullRequest)
         self.on_branch_move = on_branch_move  # async callback(branch, old_sha, new_sha)
+        self.on_approve = on_approve          # async callback(PullRequest, login)
+        self.approvers = set(approvers or [])
         self.last_error: str | None = None
         self.last_ok: float | None = None
 
@@ -81,6 +96,8 @@ class GitHubPoller:
                                (self.repo, pr.number, pr.head_sha))
             if not seen and not pr.draft:
                 await self.on_pr(pr)
+        if self.on_approve:
+            await self.check_approvals()
         if self.on_branch_move:
             for branch in ("main", "uat"):
                 st, _, b = await asyncio.to_thread(_gh_api, f"/repos/{self.repo}/branches/{branch}", None)
@@ -95,6 +112,22 @@ class GitHubPoller:
         self.last_error = None
         import time
         self.last_ok = time.time()
+
+    async def check_approvals(self) -> None:
+        """A needs-human verdict can be overridden by an approver commenting `/flect approve` on the PR."""
+        for raw in self.db.get("gh:pulls", []):
+            pr = PullRequest(**raw)
+            row = self.db.one("SELECT state, updated_ts FROM prs WHERE repo=? AND number=? AND head_sha=?",
+                              (self.repo, pr.number, pr.head_sha))
+            if not row or row["state"] != "needs_human":
+                continue
+            st, _, body = await asyncio.to_thread(
+                _gh_api, f"/repos/{self.repo}/issues/{pr.number}/comments?since={row['updated_ts'].replace('+00:00', 'Z')}&per_page=50", None)
+            if st != 200:
+                continue
+            login = approval_from_comments(json.loads(body or "[]"), self.approvers)
+            if login:
+                await self.on_approve(pr, login)
 
     async def run(self) -> None:
         while True:

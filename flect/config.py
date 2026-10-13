@@ -28,6 +28,8 @@ DEFAULTS: dict = {
         "identity_email": "67731207+soczap@users.noreply.github.com",
         "feature_base": "uat",
         "prod_branch": "main",
+        # GitHub logins allowed to override a needs-human verdict with a "/flect approve" PR comment.
+        "approvers": ["soczap"],
     },
     "target": {
         "name": "vigil",

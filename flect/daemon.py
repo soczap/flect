@@ -67,7 +67,8 @@ class Flect:
         self.anomaly = AnomalyDetector()
         self.tailer = LogTailer(self.db, t["logs"])
         self.tailer.subscribe(self._on_record)
-        self.poller = GitHubPoller(self.db, gh["repo"], gh["poll_interval_s"], self.engine.on_pr, self.engine.on_branch_move)
+        self.poller = GitHubPoller(self.db, gh["repo"], gh["poll_interval_s"], self.engine.on_pr, self.engine.on_branch_move,
+                                   self.engine.on_human_approval, gh.get("approvers"))
         self.pending: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self.started = time.time()
         self.stale_skipped = 0

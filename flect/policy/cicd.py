@@ -78,6 +78,25 @@ class CicdFlows:
             await self.act("prguard", "label_pr", f"PR#{pr.number}", {"label": "flect:needs-human"},
                            lambda: self.github.add_labels(pr.number, ["flect:needs-human"]), github_write=True)
 
+    async def on_human_approval(self, pr, login: str) -> None:
+        """Override a needs-human verdict. Never applies to blocked PRs; never merges on its own."""
+        repo = self.cfg["github"]["repo"]
+        row = self.db.one("SELECT state, statuses FROM prs WHERE repo=? AND number=? AND head_sha=?",
+                          (repo, pr.number, pr.head_sha))
+        if not row or row["state"] != "needs_human":
+            return
+        tests = json.loads(row["statuses"] or "{}").get("tests")
+        await self.github_status(pr.head_sha, "flect/pr-guard", "success", f"approved by @{login} (was needs-human)")
+        await self.github_status(pr.head_sha, "flect/sandbox-tests", "success",
+                                 "tests passed" if tests == "passed" else f"waived by @{login}")
+        self.db.execute("UPDATE prs SET state='approved', updated_ts=? WHERE repo=? AND number=? AND head_sha=?",
+                        (now(), repo, pr.number, pr.head_sha))
+        await self.act("prguard", "comment_pr", f"PR#{pr.number}", {"approved_by": login},
+                       lambda: self.github.comment(pr.number, f"### ✅ Flect: approved by @{login}\n\nThe needs-human "
+                                                   f"verdict for `{pr.head_sha[:12]}` was overridden; Flect's checks are "
+                                                   "now green. Merge when ready. A new push will be reviewed again."),
+                       github_write=True)
+
     async def after_guard(self, pr, verdict) -> None:
         gh = self.cfg["github"]
         if rules.can_auto_merge_feature(pr.kind, pr.base_ref, gh["feature_base"], verdict.decision, verdict.tests):

@@ -19,6 +19,12 @@ Environment=VIGIL_COOKIE_SECURE=true
 Environment=VIGIL_FRS_ENABLED=false
 Environment=VIGIL_AGENTS_ENABLED=false
 Environment=VIGIL_DEVICE=cpu
+Environment=VIGIL_TIMEZONE=Asia/Kolkata
+# Models are shared read-only with prod (gitignored, not in the clone).
+Environment=VIGIL_MODELS_DIR=%h/VIGIL/models
+Environment=VIGIL_VIOLENCE_MODEL_DIR=%h/VIGIL/models/violence/videomae_rwf2000
+Environment=VIGIL_FACE_DET_MODEL=%h/VIGIL/models/frs/det_10g.onnx
+Environment=VIGIL_FACE_REC_MODEL=%h/VIGIL/models/frs/adaface_ir101_webface12m.onnx
 StandardOutput=append:%h/VIGIL-uat-data/logs/service.out
 StandardError=append:%h/VIGIL-uat-data/logs/service.out
 MemoryMax=6G

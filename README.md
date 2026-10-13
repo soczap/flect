@@ -106,6 +106,21 @@ flect pause "maintenance"    # stop all GitHub writes; detection and blocking co
 flect resume
 ```
 
+### Overriding a needs-human verdict
+
+`uat` and `main` are branch-protected: GitHub refuses a merge unless `flect/pr-guard`, `flect/secrets` and
+`flect/sandbox-tests` are green, and that applies to admins too. When Flect marks a PR **needs-human** (for
+example a dependency bump or binary files), a listed approver (`[github] approvers`, default `soczap`) comments
+a line starting with:
+
+```
+/flect approve <optional reason>
+```
+
+Flect then sets its checks to green, recording who approved, and you merge. **Blocked** PRs (high-severity
+findings, secrets, failing tests, prompt-injection attempts) cannot be approved this way. A new push is
+reviewed from scratch.
+
 Reports (PR guard, VAPT, incidents) are written to `data/reports/` and shown on the dashboard. Set
 `[notify] github = true` to also open GitHub issues for incidents.
 
