@@ -13,7 +13,7 @@ dos     = "observe"        # nftables IP blocks (needs deploy/root/install-root.
 crash   = "observe"        # rollback/restart prod, hotfix PR + auto-merge + deploy (needs sandbox)
 cicd    = "observe"        # deploy uat on merge, deploy prod after a human merges a release
 vapt    = "observe"        # post VAPT report + flect/vapt status on release PRs
-keys    = "observe"
+keys    = "observe"        # pause GitHub writes while Flect's token is expired or failing; off skips the checks
 
 [notify]
 github = false             # true: also open GitHub issues for incidents (otherwise dashboard + data/reports)

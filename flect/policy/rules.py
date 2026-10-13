@@ -77,6 +77,14 @@ def fix_attempted_recently(db, signature: str, hours: int = 6) -> bool:
     return bool(row and row["n"])
 
 
+def in_post_deploy_watch(db, sha: str, minutes: float) -> dict | None:
+    """Flect's own production deploy of `sha` (a hotfix, or a release a human merged) if it happened within the
+    last `minutes`. A crash in that window is treated as a regression of that deploy."""
+    since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    return db.one("SELECT * FROM deployments WHERE env='prod' AND sha=? AND trigger IN ('hotfix','human_merge') "
+                  "AND started_ts > ? ORDER BY id DESC LIMIT 1", (sha, since))
+
+
 def last_known_good(db) -> dict | None:
     return db.one("SELECT * FROM deployments WHERE env='prod' AND state='lkg' ORDER BY id DESC LIMIT 1")
 

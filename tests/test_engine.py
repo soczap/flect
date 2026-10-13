@@ -54,6 +54,7 @@ def test_enforce_mode_blocks_with_escalating_ttl(cfg, db):
 
 def test_github_writes_pause_when_token_expired(cfg, db):
     db.set("mode:prguard", "enforce")
+    db.set("mode:keys", "enforce")
     e = Engine(cfg, db)
     expired = KeyStatus("github-pat (gh, soczap)", "github_pat", "gh", datetime.now(timezone.utc) - timedelta(hours=1), True)
     run(e.on_key_results([expired]))
@@ -133,3 +134,50 @@ def test_uat_stops_after_deploy_when_on_demand(cfg, db):
     run(e.on_branch_move("uat", "a" * 40, "b" * 40))
     assert UAT.stopped == 1
     assert db.one("SELECT env, state FROM deployments") == {"env": "uat", "state": "healthy"}
+
+
+def pat(days=None, ok=True):
+    exp = datetime.now(timezone.utc) + timedelta(days=days) if days is not None else None
+    return KeyStatus("github-pat (gh, soczap)", "github_pat", "gh", exp, ok)
+
+
+def test_keys_observe_reports_but_does_not_pause(cfg, db):
+    e = Engine(cfg, db)                                   # keys ships in observe
+    for _ in range(3):
+        run(e.on_key_results([pat(days=-1)]))
+    assert e.writes_paused() is None
+    rows = db.all("SELECT mode, result FROM actions WHERE decision='pause_github_writes'")
+    assert len(rows) == 1 and rows[0]["mode"] == "observe"        # once per level change, not every check
+    assert db.one("SELECT title FROM incidents")["title"].endswith("expired")
+
+
+def test_keys_off_skips_checks(cfg, db):
+    db.set("mode:keys", "off")
+    e = Engine(cfg, db)
+    run(e.on_key_results([pat(days=-1)]))
+    assert db.one("SELECT COUNT(*) n FROM keys")["n"] == 0
+    assert db.one("SELECT COUNT(*) n FROM incidents")["n"] == 0 and e.writes_paused() is None
+
+
+def test_keys_enforce_pauses_after_switching_from_observe(cfg, db):
+    e = Engine(cfg, db)
+    run(e.on_key_results([pat(days=-1)]))
+    assert e.writes_paused() is None
+    db.set("mode:keys", "enforce")
+    run(e.on_key_results([pat(days=-1)]))                 # same level as before, still applied in enforce
+    assert e.writes_paused() == "GitHub token expired"
+    run(e.on_key_results([pat(days=60)]))
+    assert e.writes_paused() is None
+    assert [r["decision"] for r in db.all("SELECT decision FROM actions WHERE mode='enforce' ORDER BY id")] == \
+        ["pause_github_writes", "resume_github_writes"]
+    assert db.verify_audit_chain()
+
+
+def test_token_pause_leaves_operator_pause_alone(cfg, db):
+    db.set("mode:keys", "enforce")
+    e = Engine(cfg, db)
+    e.set_paused("maintenance")
+    run(e.on_key_results([pat(days=-1)]))
+    assert e.writes_paused() == "maintenance"
+    run(e.on_key_results([pat(days=60)]))
+    assert e.writes_paused() == "maintenance"

@@ -106,10 +106,27 @@ class CrashFlows:
         if event.severity == "S1":
             self.db.update_incident(incident_id, state="mitigating")
             await self.mitigate(incident_id)
+        else:
+            # Production is still up. Right after Flect deployed a change, though, an error burst is that change
+            # regressing: roll it back instead of waiting for it to take production down.
+            watch = self.cfg["crash"]["post_deploy_watch_minutes"]
+            recent = rules.in_post_deploy_watch(self.db, crashed_sha, watch)
+            if recent:
+                self.db.update_incident(incident_id, state="mitigating",
+                                        summary=f"Error burst within {watch} minutes of deploying {crashed_sha[:12]} "
+                                                f"({recent['trigger'].replace('_', ' ')}); rolling back.")
+                await self.mitigate(incident_id, allow_restart=False)
+                row = self.db.one("SELECT state FROM incidents WHERE id=?", (incident_id,))
+                if row and row["state"] == "mitigating":
+                    why = ("crash recovery is not enforcing" if self.mode("crash") != "enforce"
+                           else "there is no older last-known-good commit to roll back to")
+                    self.db.update_incident(incident_id, state="open",
+                                            summary=f"Error burst within {watch} minutes of deploying {crashed_sha[:12]}; "
+                                                    f"not rolled back because {why}.")
         if event.classification == "code" and tb and tb.app_frames:
             asyncio.create_task(self._fix_forward_safe(incident_id, tb, crashed_sha), name=f"fix-forward-{incident_id}")
 
-    async def mitigate(self, incident_id: int, allow_rollback: bool = True) -> None:
+    async def mitigate(self, incident_id: int, allow_rollback: bool = True, allow_restart: bool = True) -> None:
         """Step A — save production without the LLM: roll back to last-known-good, else restart."""
         if rules.auto_deploys_last_hour(self.db) >= rules.MAX_AUTO_PROD_DEPLOYS_PER_HOUR:
             self.db.update_incident(incident_id, state="needs_human",
@@ -123,6 +140,8 @@ class CrashFlows:
                 self.db.update_incident(incident_id, state="mitigated",
                                         summary=f"Rolled back {current[:12]} → last-known-good {lkg['sha'][:12]}.")
                 return
+        if not allow_restart:
+            return
         result = await self.act("crash", "restart_prod", self.prod.unit, {"sha": current[:12]},
                                 lambda: asyncio.to_thread(self.prod.restart), incident_id)
         if result is not None and getattr(result, "ok", False):

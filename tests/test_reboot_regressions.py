@@ -74,6 +74,7 @@ def test_scan_rule_ignores_successful_browsing(cfg):
 
 
 def test_single_failed_probe_does_not_pause(cfg, db):
+    db.set("mode:keys", "enforce")
     e = Engine(cfg, db)
     pat_fail = KeyStatus("github-pat (gh, soczap)", "github_pat", "gh", None, False, "DNS not up")
     asyncio.run(e.on_key_results([pat_fail]))

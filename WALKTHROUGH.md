@@ -69,7 +69,7 @@ Flect has six capabilities, and each one has its own mode:
 | `crash` | Crash recovery | Roll back or restart production, push a hotfix branch, open and merge the hotfix PR, deploy it |
 | `cicd` | CI/CD | Deploy UAT when `uat` moves, deploy production after a human merges into `main` |
 | `vapt` | Release VAPT | Post the VAPT report and the `flect/vapt` status on release PRs |
-| `keys` | Keys and services | Nothing extra today: the checks, their incidents and the automatic GitHub pause run in every mode |
+| `keys` | Keys and services | Pause GitHub writes while Flect's token is expired or failing, and lift that pause when it works again |
 
 The three modes:
 
@@ -78,12 +78,17 @@ The three modes:
   capability ships in observe so you can review what it would have done before trusting it.
 - **enforce**: it acts.
 
+Detection and reporting carry on in observe: blocks become "would block", key alerts still open incidents,
+and so on. Only the actions wait for enforce.
+
 Change a mode at runtime with `flect mode <capability> <mode>`. The change takes effect immediately and is
 itself written to the audit log. Setting `dry_run = true` in `flect.toml` forces every capability to observe.
 
 **Pausing GitHub writes.** `flect pause "reason"` stops every GitHub write (statuses, comments, merges,
 issues) while detection and IP blocking carry on. `flect resume` lifts it. Flect also pauses itself when its
-GitHub token expires or stops working, and resumes on its own once the token is healthy again.
+GitHub token expires or stops working, and resumes on its own once the token is healthy again (this is the
+`keys` capability's action, so it needs `keys` in enforce). It never overrides or lifts a pause you set
+yourself.
 
 ## 3. PR guard: stopping poisonous pull requests
 
@@ -217,8 +222,14 @@ When production is down (S1):
    than loop.
 
 The incident resolves on its own once health checks pass again. Environmental crashes get a restart if
-production is down, then the incident is marked **needs a human**. An S2 error burst leaves production
-running and goes straight to step B.
+production is down, then the incident is marked **needs a human**.
+
+**Error bursts (S2)** leave production running, so normally Flect goes straight to step B. The exception is
+the **post-deploy watch**: for 10 minutes (`post_deploy_watch_minutes`) after Flect deploys a hotfix or a
+release a human merged, an error burst counts as that deploy regressing, and Flect rolls back to
+last-known-good at once rather than waiting for production to go down. It only rolls back, never restarts;
+if there is no older good commit, or crash recovery is not enforcing, the incident stays open and says why.
+Changes made outside Flect are not watched this way.
 
 ### Step B: fix forward, with proof
 
@@ -237,10 +248,11 @@ When a fix proves itself, Flect:
 - pushes `flect/hotfix-<incident>` as `soczap`
 - opens a `[flect] Hotfix` PR into `main` and runs the PR guard on it
 - merges it automatically (the only autonomous merge into production) and deploys it
-- rolls back to last-known-good if the deploy fails its 60-second health check
+- rolls back to last-known-good if the deploy fails its 60-second health check, or if an error burst
+  follows within the 10-minute post-deploy watch
 - resolves the incident and opens a back-merge PR into `uat`
 
-If no fix proves itself, the incident records why, and production stays on the rolled-back commit.
+If no fix proves itself, the incident records why, and production stays where step A left it.
 
 ## 7. CI/CD: the pipeline itself
 
@@ -254,7 +266,8 @@ release PR (uat → main) ──► PR guard ──► VAPT on UAT ──► a h
 
 - **When `uat` moves,** Flect deploys it to the UAT instance (`~/VIGIL-uat`, port 8190).
 - **When `main` moves** (a human merged a release), Flect deploys it to production and verifies health.
-  A failed deploy rolls back to last-known-good automatically.
+  A failed deploy rolls back to last-known-good automatically, and so does an error burst in the first 10
+  minutes (the post-deploy watch, see [crash recovery](#6-crash-recovery-rollback-then-fix-forward)).
 - **UAT on demand.** UAT shares memory with the 104 GB model, so it starts only for a deploy or a scan and
   stops afterwards.
 - **Changes made outside Flect** (someone ran `git checkout` in `~/VIGIL`) are noticed and recorded as
@@ -316,9 +329,10 @@ when the item is healthy again.
 **No false alarms at boot.** A single failed check is ignored; anything failing is re-checked after two
 minutes, and only a second failure counts.
 
-**Token protection.** If the GitHub token expires or stops working, Flect pauses all GitHub writes
-automatically, and resumes once it works again. Secret values are read only inside this module and never
-leave it.
+**Token protection.** With `keys` in enforce, if the GitHub token expires or stops working, Flect pauses
+all GitHub writes, and resumes once it works again. In observe it records that it would have paused, once per
+change rather than on every check. In off, none of these checks run. Secret values are read only inside this
+module and never leave it.
 
 ## 10. DeepSeek, and how Flect keeps it on a leash
 
@@ -456,7 +470,7 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 | `[github]` | `repo`, `feature_base` (`uat`), `prod_branch` (`main`), `approvers`, poll interval |
 | `[notify]` | `github`: also open GitHub issues for incidents |
 | `[dos]` | `allowlist`, `per_ip_rps`, `per_ip_sustain_s`, `failed_logins_per_min`, `failed_paths_per_min`, flood factor and floor, block lengths |
-| `[crash]` | health interval and failure count, restart-loop and error-burst windows, last-known-good minutes, hotfix size limits and forbidden paths, fix attempts |
+| `[crash]` | health interval and failure count, restart-loop and error-burst windows, last-known-good minutes, post-deploy watch minutes, hotfix size limits and forbidden paths, fix attempts |
 | `[keys]` | check interval, warning days, certificate warning days, `extra` services to probe |
 | `[vapt]` | `osv`: opt in to the online dependency check |
 | `[target]` | VIGIL's directories, systemd units, URLs, log files, TLS certificates, and whether UAT runs on demand |

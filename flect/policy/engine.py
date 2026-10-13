@@ -141,7 +141,27 @@ class Engine(CrashFlows, CicdFlows):
                 log.warning("restore block %s failed: %s", row["ip"], exc)
 
     # ── keys / expiry ──────────────────────────────────────────────────────
+    async def _token_pause(self, level: str, changed: bool) -> None:
+        """Pause GitHub writes while Flect's token is expired or failing; lift that pause once it works again.
+
+        Enforce applies it on every check (so it also takes effect after switching to enforce). Observe records
+        the would-do only when the token's level changes, not on every check. An operator's own pause is never
+        overwritten or lifted here.
+        """
+        paused = self.writes_paused() or ""
+        by_token = paused.startswith("GitHub token")
+        bad = level in ("expired", "failing")
+        if not (changed or self.mode("keys") == "enforce"):
+            return
+        if bad and not paused:
+            reason = f"GitHub token {'expired' if level == 'expired' else 'not working'}"
+            await self.act("keys", "pause_github_writes", "github", {"reason": reason}, lambda: self.set_paused(reason))
+        elif not bad and by_token:
+            await self.act("keys", "resume_github_writes", "github", {"was": paused}, lambda: self.set_paused(None))
+
     async def on_key_results(self, results) -> None:
+        if self.mode("keys") == "off":
+            return
         warn = self.cfg["keys"]["warn_days"]
         cert_warn = self.cfg["keys"]["cert_warn_days"]
         for st in results:
@@ -162,12 +182,9 @@ class Engine(CrashFlows, CicdFlows):
                 "last_probe_ok=excluded.last_probe_ok, alert_level=excluded.alert_level, details=excluded.details",
                 (st.name, st.kind, st.location, st.expires.isoformat() if st.expires else None, days, now(),
                  None if st.probe_ok is None else int(st.probe_ok), level, st.details))
-            if st.kind == "github_pat":
-                if level in ("expired", "failing"):
-                    self.set_paused(f"GitHub token {'expired' if level == 'expired' else 'not working'}")
-                elif (self.writes_paused() or "").startswith("GitHub token"):
-                    self.set_paused(None)
             changed = (prev or {}).get("alert_level") != level
+            if st.kind == "github_pat":
+                await self._token_pause(level, changed)
             if changed and level != "ok":
                 sev = "critical" if level in ("expired", "failing") else "high" if level in ("T-1d", "T-3d") else "medium"
                 incident_id, created = self.db.open_incident(

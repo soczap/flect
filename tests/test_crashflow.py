@@ -112,3 +112,52 @@ def test_failed_deploy_rolls_back(cfg, db):
     db.execute("UPDATE deployments SET state='lkg'")
     asyncio.run(e.deploy_prod("d" * 40, "human_merge", "cicd"))
     assert prod.deploys == ["d" * 40, "a" * 40]
+
+
+def s2():
+    return CrashEvent("S2", "KeyError repeated 5x in 600s", "unknown", None, {})
+
+
+def test_error_burst_right_after_a_deploy_rolls_back(cfg, db):
+    db.set("mode:crash", "enforce")
+    prod = FakeDeployer("b" * 40)
+    e = Engine(cfg, db, prod=prod)
+    seed(db, e)                                           # "b" was deployed after a human merge, just now
+    asyncio.run(e.on_crash(s2()))
+    assert prod.deploys == ["a" * 40] and prod.restarts == 0
+    inc = db.one("SELECT state, summary FROM incidents")
+    assert inc["state"] == "mitigated" and "last-known-good" in inc["summary"]
+
+
+def test_error_burst_after_the_watch_window_does_not_roll_back(cfg, db):
+    db.set("mode:crash", "enforce")
+    prod = FakeDeployer("b" * 40)
+    e = Engine(cfg, db, prod=prod)
+    seed(db, e)
+    db.execute("UPDATE deployments SET started_ts=datetime('now','-30 minutes') WHERE sha=?", ("b" * 40,))
+    asyncio.run(e.on_crash(s2()))
+    assert prod.deploys == [] and prod.restarts == 0
+    assert db.one("SELECT state FROM incidents")["state"] == "open"
+
+
+def test_error_burst_after_a_manual_change_does_not_roll_back(cfg, db):
+    db.set("mode:crash", "enforce")
+    prod = FakeDeployer("b" * 40)
+    e = Engine(cfg, db, prod=prod)
+    e.record_deployment("prod", "a" * 40, None, "bootstrap", "healthy")
+    db.execute("UPDATE deployments SET state='lkg'")
+    e.record_deployment("prod", "b" * 40, "a" * 40, "manual", "healthy")   # changed outside Flect
+    asyncio.run(e.on_crash(s2()))
+    assert prod.deploys == []
+
+
+def test_watched_burst_without_rollback_target_reopens(cfg, db):
+    db.set("mode:crash", "enforce")
+    prod = FakeDeployer("a" * 40)
+    e = Engine(cfg, db, prod=prod)
+    e.record_deployment("prod", "a" * 40, None, "hotfix", "healthy")
+    db.execute("UPDATE deployments SET state='lkg'")
+    asyncio.run(e.on_crash(s2()))
+    assert prod.deploys == [] and prod.restarts == 0
+    inc = db.one("SELECT state, summary FROM incidents")
+    assert inc["state"] == "open" and "no older last-known-good" in inc["summary"]

@@ -189,6 +189,9 @@ class Flect:
 
     async def _keys(self) -> None:
         while True:
+            if self.engine.mode("keys") == "off":
+                await asyncio.sleep(60)
+                continue
             try:
                 results = await asyncio.to_thread(keys_src.run_all, self.cfg)
                 await self.engine.on_key_results(results)

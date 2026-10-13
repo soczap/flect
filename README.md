@@ -86,7 +86,7 @@ npm run dev                            # live-reload on :5173, proxying /api to 
 git clone https://github.com/soczap/flect.git ~/flect && cd ~/flect
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 cp flect.example.toml flect.toml            # all capabilities start in observe mode
-.venv/bin/python -m pytest                  # 59 tests
+.venv/bin/python -m pytest                  # full test suite
 .venv/bin/flect keys                        # one-shot expiry/liveness check
 
 mkdir -p ~/.config/systemd/user
@@ -99,7 +99,7 @@ flect status                                 # or open http://127.0.0.1:1113
 
 | Step | Why | Command |
 |---|---|---|
-| Rotate the GitHub token | the soczap PAT expires **2026-10-15 08:28 UTC**; Flect pauses GitHub writes when it expires | create a fine-grained PAT for `soczap/flect` + `soczap/Computer_Vision` (Contents, Pull requests, Commit statuses, Issues, Administration: read/write), then `gh auth login --with-token < token.txt` |
+| Rotate the GitHub token | the soczap PAT expires **2026-10-15 08:28 UTC**; with `keys` in enforce, Flect pauses GitHub writes when it expires | create a fine-grained PAT for `soczap/flect` + `soczap/Computer_Vision` (Contents, Pull requests, Commit statuses, Issues, Administration: read/write), then `gh auth login --with-token < token.txt` |
 | Privileged setup | enables IP blocking and the test sandbox (Ubuntu 24.04 blocks unprivileged user namespaces) | `sudo ~/flect/deploy/root/install-root.sh` |
 | Remove llama.cpp shell tools | `--tools all` lets anything that reaches :1111 run shell commands; Flect feeds the model attacker-controlled text | `pkill -x llama-server && TOOLS=none ~/deepseek/run-deepseek.sh` (~7 min reload) |
 | Point prod at Computer_Vision | `~/VIGIL` still tracks `soczap/video-analytics`; trees are identical except 4 slide files | move the untracked `ppt_*`/slide files aside, then `git -C ~/VIGIL remote set-url origin https://github.com/soczap/Computer_Vision.git` |

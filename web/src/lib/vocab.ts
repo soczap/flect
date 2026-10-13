@@ -78,6 +78,9 @@ const DECISION: Record<string, string> = {
   resolve_false_positives: "Closed false positives",
   comment_vapt: "Posted a VAPT report",
   open_backmerge_pr: "Opened a back-merge PR",
+  deploy_uat: "Deployed to UAT",
+  pause_github_writes: "Paused GitHub writes",
+  resume_github_writes: "Resumed GitHub writes",
 };
 export function decisionText(a: Pick<Action, "decision">): string {
   const d = a.decision || "";
