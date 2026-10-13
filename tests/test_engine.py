@@ -106,3 +106,13 @@ def test_notifier_respects_pause(db, tmp_path):
     db.set("writes_paused", None)
     assert n.incident(i, "t", "b") == 42 and gh.opened == ["[flect] t"]
     assert n.incident(i, "t", "b") == 42 and len(gh.opened) == 1          # one issue per incident
+
+
+def test_env_scan_registers_only_secret_settings(tmp_path):
+    from flect import redact
+    from flect.sources.keys import jwt_in_env_file
+    env = tmp_path / ".env"
+    env.write_text("VIGIL_FRS_URL=https://127.0.0.1:8000\nVIGIL_PORT=8090\nVIGIL_JWT_SECRET=abcdef123456789xyz\n")
+    jwt_in_env_file(str(env))
+    out = redact.redact("url https://127.0.0.1:8000 port 8090 secret abcdef123456789xyz")
+    assert "https://127.0.0.1:8000" in out and "8090" in out and "abcdef123456789xyz" not in out

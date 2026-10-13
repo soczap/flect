@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from flect.redact import register_secret
 from flect.sources.health import http_health
 
+SECRET_NAME_RE = re.compile(r"(?i)(secret|token|password|passwd|key|credential|jwt|auth)")
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+\b")
 
 
@@ -125,7 +126,8 @@ def jwt_in_env_file(path: str) -> list[KeyStatus]:
             continue
         name, value = line.split("=", 1)
         value = value.strip().strip('"').strip("'")
-        register_secret(value)
+        if SECRET_NAME_RE.search(name) or JWT_RE.search(value):
+            register_secret(value)       # only secret-looking settings; URLs/ports/paths stay readable
         m = JWT_RE.search(value)
         if not m:
             continue
