@@ -65,3 +65,21 @@ def test_s1_on_restart_loop(cfg):
     assert d.observe_probe(probe(restarts=5), 5) is None
     ev = d.observe_probe(probe(restarts=6), 10)
     assert ev and "restarts" in ev.reason
+
+
+def test_deliberate_stop_is_not_a_crash(cfg):
+    d = CrashDetector(cfg["crash"], APP)
+    d.observe_probe(probe(), 0)
+    for t in range(5, 60, 5):                       # operator ran `systemctl --user stop vigil`
+        assert d.observe_probe(probe(False, state="inactive"), t) is None
+    assert d.observe_probe(probe(False, state="activating"), 65) is None   # starting back up
+    assert d.observe_probe(probe(), 70) is None
+    for t in (75, 80):
+        assert d.observe_probe(probe(False), t) is None
+    assert d.observe_probe(probe(False), 85).severity == "S1"            # a real outage afterwards
+
+
+def test_failed_unit_is_a_crash(cfg):
+    d = CrashDetector(cfg["crash"], APP)
+    d.observe_probe(probe(), 0)
+    assert d.observe_probe(probe(False, state="failed"), 5).severity == "S1"

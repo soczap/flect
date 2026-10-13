@@ -120,6 +120,9 @@ class GitHub:
         for label in labels or []:
             args += ["--label", label]
         res = subprocess.run(args, capture_output=True, text=True, timeout=60, check=False)
+        if res.returncode != 0 and labels and "label" in (res.stderr or "").lower():
+            # A missing label must not lose the incident report: retry without labels.
+            res = subprocess.run(args[:9], capture_output=True, text=True, timeout=60, check=False)
         m = re.search(r"/issues/(\d+)", res.stdout)
         return int(m.group(1)) if m else None
 

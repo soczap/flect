@@ -86,3 +86,23 @@ def test_hotfix_merge_rule_is_narrow():
     assert can_auto_merge_feature("feature", "uat", "uat", "pass", "passed")
     assert not can_auto_merge_feature("feature", "main", "uat", "pass", "passed")     # never straight to prod
     assert not can_auto_merge_feature("feature", "uat", "uat", "pass", "unavailable")
+
+
+def test_notifier_respects_pause(db, tmp_path):
+    from flect.actuators.notify import Notifier
+
+    class GH:
+        opened = []
+
+        def open_issue(self, title, body, labels):
+            self.opened.append(title)
+            return 42
+
+    gh = GH()
+    n = Notifier(db, tmp_path / "r", gh, True, paused=lambda: db.get("writes_paused"))
+    i, _ = db.open_incident("expiry", "high", "t", {})
+    db.set("writes_paused", "maintenance")
+    assert n.incident(i, "t", "b") is None and gh.opened == []
+    db.set("writes_paused", None)
+    assert n.incident(i, "t", "b") == 42 and gh.opened == ["[flect] t"]
+    assert n.incident(i, "t", "b") == 42 and len(gh.opened) == 1          # one issue per incident

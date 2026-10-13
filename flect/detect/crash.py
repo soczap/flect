@@ -92,6 +92,7 @@ class CrashDetector:
         self.sig_times: dict[str, deque] = defaultdict(deque)
         self.last_tb: Traceback | None = None
         self.down = False
+        self.stopped = False
 
     def observe_traceback(self, text: str, t: float) -> CrashEvent | None:
         tb = parse_traceback(text, self.app_dir)
@@ -118,7 +119,17 @@ class CrashDetector:
         while self.restart_times and self.restart_times[0] < t - window:
             self.restart_times.popleft()
 
+        # A cleanly stopped unit ("inactive") means an operator stopped it on purpose; with Restart=always a
+        # crash shows up as activating/failed or a restart loop instead. Never fight a deliberate stop.
+        if probe.active_state in ("inactive", "deactivating"):
+            self.consecutive_failures = 0
+            self.stopped = True
+            return None
+        if self.stopped and probe.http_ok:
+            self.stopped = False
         self.consecutive_failures = 0 if probe.http_ok else self.consecutive_failures + 1
+        if self.stopped:
+            return None          # still starting back up after a deliberate stop
         reasons = []
         if self.consecutive_failures >= self.cfg["health_fail_probes"]:
             reasons.append(f"health failed {self.consecutive_failures} consecutive probes ({probe.error})")

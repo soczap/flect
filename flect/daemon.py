@@ -52,7 +52,8 @@ class Flect:
         self.uat = (Deployer(t["uat_dir"], t["uat_unit"], t["uat_url"], t["health_path"], None, repo_url)
                     if Path(t["uat_dir"]).is_dir() else None)
         notify_github = bool(cfg.data.get("notify", {}).get("github", False))
-        self.notifier = Notifier(self.db, data / "reports", self.github, notify_github)
+        self.notifier = Notifier(self.db, data / "reports", self.github, notify_github,
+                                 paused=lambda: self.db.get("writes_paused"))
         self.clone = Git(str(data / "work" / "clone"), gh["identity_name"], gh["identity_email"])
         venv = t["venv"]
         self.engine = Engine(
