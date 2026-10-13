@@ -1,0 +1,27 @@
+[Unit]
+Description=VIGIL UAT instance (loopback only; target of Flect VAPT)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/VIGIL-uat
+ExecStart=%h/VIGIL/.venv/bin/python -m vigil.main
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HUB_OFFLINE=1
+Environment=VIGIL_HOST=127.0.0.1
+Environment=VIGIL_PORT=8190
+Environment=VIGIL_DATA_DIR=%h/VIGIL-uat-data
+Environment=VIGIL_TLS_CERT=%h/VIGIL-uat-data/certs/server.crt
+Environment=VIGIL_TLS_KEY=%h/VIGIL-uat-data/certs/server.key
+Environment=VIGIL_COOKIE_SECURE=true
+Environment=VIGIL_FRS_ENABLED=false
+Environment=VIGIL_AGENTS_ENABLED=false
+Environment=VIGIL_DEVICE=cpu
+StandardOutput=append:%h/VIGIL-uat-data/logs/service.out
+StandardError=append:%h/VIGIL-uat-data/logs/service.out
+MemoryMax=6G
+
+[Install]
+WantedBy=default.target

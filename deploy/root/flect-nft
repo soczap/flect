@@ -1,0 +1,105 @@
+#!/usr/bin/python3 -I
+"""flect-nft — the ONLY privileged entry point Flect uses. Installed root:root 0755 at /usr/local/sbin.
+
+Allowed (via sudoers, for the Flect user only):
+  flect-nft add <ip> <15m|1h|24h>     add an IP to the blocklist with a timeout
+  flect-nft del <ip>                  remove an IP from the blocklist
+  flect-nft list                      print active blocks as JSON
+  flect-nft flood-on <rate 10-1000>   per-source new-connection rate limit on the protected ports
+  flect-nft flood-off                 remove the rate limit
+Every argument is validated here; allowlisted ranges can never be blocked, whatever the caller asks.
+No shell is involved: nft is executed with an argument list.
+"""
+import ipaddress
+import json
+import subprocess
+import sys
+
+NFT = "/usr/sbin/nft"
+TABLE = ("inet", "flect")
+TTLS = {"15m", "1h", "24h"}
+ALLOWLIST_FILE = "/etc/flect/allowlist"
+DEFAULT_ALLOWLIST = ["127.0.0.0/8", "::1/128", "192.168.7.0/24", "100.87.127.50/32", "fd7a:115c:a1e0::/48",
+                     "0.0.0.0/8", "169.254.0.0/16", "fe80::/10", "224.0.0.0/4", "ff00::/8"]
+
+
+def die(msg, code=2):
+    print(f"flect-nft: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def allowlist():
+    nets = list(DEFAULT_ALLOWLIST)
+    try:
+        with open(ALLOWLIST_FILE) as fh:
+            nets += [line.split("#", 1)[0].strip() for line in fh if line.split("#", 1)[0].strip()]
+    except FileNotFoundError:
+        pass
+    return [ipaddress.ip_network(n, strict=False) for n in nets]
+
+
+def parse_ip(text):
+    try:
+        ip = ipaddress.ip_address(text)
+    except ValueError:
+        die(f"not an IP address: {text!r}")
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    if any(ip in net for net in allowlist() if net.version == ip.version):
+        die(f"{ip} is allowlisted and cannot be blocked", 3)
+    return ip
+
+
+def nft(*args):
+    res = subprocess.run([NFT, *args], capture_output=True, text=True, timeout=15)
+    if res.returncode != 0:
+        die(f"nft failed: {res.stderr.strip()[:300]}", 4)
+    return res.stdout
+
+
+def setname(ip):
+    return "blocklist4" if ip.version == 4 else "blocklist6"
+
+
+def main(argv):
+    if not argv:
+        die("usage: add <ip> <ttl> | del <ip> | list | flood-on <rate> | flood-off")
+    cmd, args = argv[0], argv[1:]
+    if cmd == "add" and len(args) == 2:
+        ip = parse_ip(args[0])
+        if args[1] not in TTLS:
+            die(f"ttl must be one of {sorted(TTLS)}")
+        nft("add", "element", *TABLE, setname(ip), f"{{ {ip} timeout {args[1]} }}")
+    elif cmd == "del" and len(args) == 1:
+        try:
+            ip = ipaddress.ip_address(args[0])
+        except ValueError:
+            die(f"not an IP address: {args[0]!r}")
+        res = subprocess.run([NFT, "delete", "element", *TABLE, setname(ip), f"{{ {ip} }}"],
+                             capture_output=True, text=True, timeout=15)
+        if res.returncode != 0 and "No such file" not in res.stderr:
+            die(f"nft failed: {res.stderr.strip()[:300]}", 4)
+    elif cmd == "list" and not args:
+        out = []
+        for name in ("blocklist4", "blocklist6"):
+            data = json.loads(nft("-j", "list", "set", *TABLE, name))
+            for item in data.get("nftables", []):
+                for elem in (item.get("set") or {}).get("elem", []) or []:
+                    e = elem.get("elem", elem) if isinstance(elem, dict) else {"val": elem}
+                    out.append({"ip": e.get("val"), "expires_s": e.get("expires"), "timeout_s": e.get("timeout")})
+        print(json.dumps(out))
+    elif cmd == "flood-on" and len(args) == 1:
+        if not args[0].isdigit() or not 10 <= int(args[0]) <= 1000:
+            die("rate must be an integer 10-1000")
+        rate = int(args[0])
+        nft("flush", "chain", *TABLE, "flood")
+        nft("add", "rule", *TABLE, "flood", "add", "@rl4", f"{{ ip saddr limit rate over {rate}/second burst {rate * 2} packets }}", "drop")
+        nft("add", "rule", *TABLE, "flood", "add", "@rl6", f"{{ ip6 saddr limit rate over {rate}/second burst {rate * 2} packets }}", "drop")
+    elif cmd == "flood-off" and not args:
+        nft("flush", "chain", *TABLE, "flood")
+    else:
+        die("invalid command or arguments")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

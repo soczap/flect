@@ -1,0 +1,2 @@
+# Flect may run exactly one privileged program, the validated nftables helper. Nothing else.
+enterprise ALL=(root) NOPASSWD: /usr/local/sbin/flect-nft

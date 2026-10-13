@@ -1,0 +1,18 @@
+[Unit]
+Description=Flect production guardian (agentic CI/CD for VIGIL)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/flect
+ExecStart=%h/flect/.venv/bin/python -m flect run
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/flect/.env
+# Flect itself never needs much memory; the model lives in llama-server.
+MemoryMax=2G
+
+[Install]
+WantedBy=default.target

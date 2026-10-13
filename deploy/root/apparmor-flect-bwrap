@@ -1,0 +1,11 @@
+# Allows ONLY the dedicated Flect bubblewrap copy to create unprivileged user namespaces
+# (Ubuntu 24.04 restricts them via kernel.apparmor_restrict_unprivileged_userns=1).
+# /usr/bin/bwrap and every other program stay restricted.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile flect-bwrap /usr/local/lib/flect/bwrap flags=(unconfined) {
+  userns,
+
+  include if exists <local/flect-bwrap>
+}

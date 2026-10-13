@@ -1,0 +1,33 @@
+# Copy to ~/flect/flect.toml. Anything omitted uses the defaults in flect/config.py.
+
+[general]
+data_dir = "~/flect/data"
+dry_run = false            # true forces every capability to observe
+
+# off | observe | enforce. Everything ships in observe: detect + report, take no action.
+# Switch one at a time after reviewing what it "would_do" on the dashboard / audit log,
+# or at runtime:  flect mode dos enforce
+[modes]
+prguard = "observe"        # PR statuses/comments/labels, closing critical PRs, auto-merge feature→uat
+dos     = "observe"        # nftables IP blocks (needs deploy/root/install-root.sh)
+crash   = "observe"        # rollback/restart prod, hotfix PR + auto-merge + deploy (needs sandbox)
+cicd    = "observe"        # deploy uat on merge, deploy prod after a human merges a release
+vapt    = "observe"        # post VAPT report + flect/vapt status on release PRs
+keys    = "observe"
+
+[notify]
+github = false             # true: also open GitHub issues for incidents (otherwise dashboard + data/reports)
+
+[github]
+repo = "soczap/Computer_Vision"
+feature_base = "uat"       # feature PRs target this branch; Flect auto-merges them here when green
+prod_branch = "main"
+
+[vapt]
+osv = false                # true sends package names+versions (only) to api.osv.dev
+
+[dos]
+allowlist = ["127.0.0.0/8", "::1/128", "192.168.7.0/24", "100.87.127.50/32", "fd7a:115c:a1e0::/48"]
+per_ip_rps = 20.0
+per_ip_sustain_s = 10
+failed_logins_per_min = 50

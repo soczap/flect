@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flect</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --line: #e3e7ec;
+    --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --info: #0969da; --chip: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --panel: #161b22; --text: #e6edf3; --muted: #8b98a8; --line: #2a313a;
+            --ok: #3fb950; --warn: #d29922; --bad: #f85149; --info: #58a6ff; --chip: #21262d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+  header .sub { color: var(--muted); }
+  main { padding: 16px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .info { color: var(--info); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .empty { color: var(--muted); font-style: italic; }
+  @media (max-width: 480px) { main { padding: 12px; } header { padding: 12px; flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<header><h1>Flect</h1><span class="sub" id="sub">loading…</span></header>
+<main>
+  <section><h2>Production</h2><div class="kv" id="prod"></div></section>
+  <section><h2>Capabilities &amp; modes</h2><div class="kv" id="modes"></div></section>
+  <section><h2>Traffic</h2><div class="kv" id="traffic"></div></section>
+  <section class="wide"><h2>Incidents</h2><div class="scroll"><table id="incidents"></table></div></section>
+  <section class="wide"><h2>Keys &amp; expiry</h2><div class="scroll"><table id="keys"></table></div></section>
+  <section><h2>IP blocks</h2><div class="scroll"><table id="blocks"></table></div></section>
+  <section><h2>Pull requests</h2><div class="scroll"><table id="prs"></table></div></section>
+  <section><h2>Deployments</h2><div class="scroll"><table id="deploys"></table></div></section>
+  <section class="wide"><h2>Audit log (latest actions)</h2><div class="scroll"><table id="actions"></table></div></section>
+</main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cls = v => ({critical:"bad",high:"bad",expired:"bad",failing:"bad",blocked:"bad",failed:"bad",
+                   medium:"warn","T-1d":"bad","T-3d":"warn","T-7d":"warn","T-30d":"warn",needs_human:"warn",
+                   ok:"ok",passed:"ok",healthy:"ok",lkg:"ok",resolved:"ok",enforce:"bad",observe:"info"}[v] || "");
+const chip = v => `<span class="chip ${cls(v)}">${esc(v)}</span>`;
+const short = s => s ? esc(String(s).slice(0, 12)) : "";
+const when = s => s ? esc(String(s).replace("T", " ").replace("+00:00", "Z")) : "";
+function kv(id, pairs) { document.getElementById(id).innerHTML = pairs.map(([k, v]) => `<div>${esc(k)}</div><div>${v}</div>`).join(""); }
+function table(id, cols, rows, empty) {
+  const el = document.getElementById(id);
+  if (!rows || !rows.length) { el.innerHTML = `<tr><td class="empty">${esc(empty)}</td></tr>`; return; }
+  el.innerHTML = `<tr>${cols.map(c => `<th>${esc(c[0])}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr>${cols.map(c => `<td>${c[1](r)}</td>`).join("")}</tr>`).join("");
+}
+async function get(p) { const r = await fetch(p); if (!r.ok) throw new Error(p); return r.json(); }
+async function refresh() {
+  try {
+    const [st, inc, keys, blocks, prs, deps, acts] = await Promise.all(["/api/status", "/api/incidents?limit=25",
+      "/api/keys", "/api/blocks", "/api/prs", "/api/deployments", "/api/actions?limit=40"].map(get));
+    const h = st.health || {}, caps = st.capabilities || {}, d = st.dos || {};
+    document.getElementById("sub").textContent = `${st.target} · ${st.repo} · updated ${new Date().toLocaleTimeString()}`
+      + (st.writes_paused ? ` · GitHub writes paused: ${st.writes_paused}` : "");
+    kv("prod", [["Health", chip(h.http_ok ? "healthy" : "failing")], ["HTTP", esc(h.http_status ?? h.error ?? "")],
+      ["Latency", h.latency_ms ? `${Math.round(h.latency_ms)} ms` : ""], ["Unit", esc(h.active_state)],
+      ["Restarts", esc(h.n_restarts)], ["Last-known-good", st.lkg ? `<code>${short(st.lkg.sha)}</code>` : chip("none yet")]]);
+    kv("modes", [...Object.entries(st.modes).map(([k, v]) => [k, chip(v)]),
+      ["sandbox", esc(caps.sandbox)], ["nft blocker", esc(caps.nft)], ["UAT", esc(caps.uat)],
+      ["LLM", esc(caps.llm) + (caps.llm_queue ? ` (queued ${caps.llm_queue.queued}, running ${caps.llm_queue.in_flight})` : "")],
+      ["GitHub poll", esc(caps.github_poll)]]);
+    kv("traffic", [["Requests/s", esc(d.global_rps)], ["Baseline/s", esc(d.baseline_rps)],
+      ["Flood mode", chip(d.flooding ? "critical" : "ok")], ["Log lines read", esc(caps.log_lines)],
+      ["Top talkers (60s)", (d.top_talkers_60s || []).map(([ip, n]) => `<code>${esc(ip)}</code> ${n}`).join("<br>") || "—"]]);
+    table("incidents", [["#", r => r.id], ["Kind", r => esc(r.kind)], ["Severity", r => chip(r.severity)],
+      ["State", r => chip(r.state)], ["Title", r => esc(r.title)], ["Summary", r => esc(r.summary || "")],
+      ["Opened", r => when(r.opened_ts)], ["Issue", r => r.github_issue ? `#${r.github_issue}` : ""]], inc, "No incidents.");
+    table("keys", [["Name", r => esc(r.name)], ["Kind", r => esc(r.kind)], ["Status", r => chip(r.alert_level)],
+      ["Expires", r => when(r.expires_ts)], ["Days left", r => esc(r.days_left ?? "")], ["Probe", r => r.last_probe_ok == null ? "" : chip(r.last_probe_ok ? "ok" : "failing")],
+      ["Details", r => esc(r.details || "")]], keys, "Key checks have not run yet.");
+    table("blocks", [["IP", r => `<code>${esc(r.ip)}</code>`], ["Rule", r => esc(r.rule_id)], ["TTL", r => esc(r.ttl)],
+      ["Mode", r => chip(r.mode)], ["Active", r => r.active ? "yes" : "no"], ["When", r => when(r.created_ts)]], blocks, "No blocks.");
+    table("prs", [["PR", r => `#${r.number}`], ["Kind", r => esc(r.kind)], ["State", r => chip(r.state)],
+      ["Risk", r => chip(r.risk || "")], ["Title", r => esc(r.title || "")]], prs, "No PRs reviewed yet.");
+    table("deploys", [["Env", r => esc(r.env)], ["Commit", r => `<code>${short(r.sha)}</code>`], ["Trigger", r => esc(r.trigger)],
+      ["State", r => chip(r.state)], ["When", r => when(r.started_ts)]], deps, "No deployments recorded.");
+    table("actions", [["When", r => when(r.ts)], ["Decision", r => esc(r.decision)], ["Target", r => `<code>${esc(r.target)}</code>`],
+      ["Mode", r => chip(r.mode)], ["Result", r => esc(r.result || "")]], acts, "No actions yet.");
+  } catch (e) { document.getElementById("sub").textContent = "dashboard API unreachable: " + e.message; }
+}
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>

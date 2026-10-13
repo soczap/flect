@@ -1,0 +1,12 @@
+[Unit]
+Description=Load the Flect nftables table (blocklists start empty after boot; Flect re-applies active blocks)
+After=network-pre.target
+Before=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/flect/flect.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
