@@ -1,0 +1,365 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* The theme is always written to <html data-theme> before first paint (see index.html). */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/*
+ * Flect is an instrument, not a brochure: surfaces are cool and colourless, and colour is spent
+ * only on state. Jade = healthy/enforcing, sodium = observing/attention, flare = failing,
+ * iris = something Flect itself did.
+ */
+:root {
+  color-scheme: light;
+  --background: #eceef1;
+  --foreground: #13171c;
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: #13171c;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f4f6;
+  --secondary-foreground: var(--foreground);
+  --muted: #f3f4f6;
+  --muted-foreground: #56606c;
+  --accent: #e5e8ec;
+  --accent-foreground: var(--foreground);
+  --destructive: #cc3138;
+  --border: #d9dee4;
+  --input: #c8cfd7;
+  --ring: #5856d6;
+  --sunken: #f6f7f9;
+  --faint: #8a939e;
+  --line-strong: #c3cad3;
+  --ok: #0f855a;
+  --warn: #a66a00;
+  --high: #c2501a;
+  --crit: #cc3138;
+  --iris: #5856d6;
+  --grid: rgb(19 23 28 / 0.055);
+  --grid-major: rgb(19 23 28 / 0.085);
+  --glow: 0.22;
+  --radius: 10px;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #13181d;
+  --foreground: #e2e6ea;
+  --card: #192026;
+  --popover: #1d242b;
+  --primary: #e2e6ea;
+  --primary-foreground: #13181d;
+  --secondary: #1f272f;
+  --muted: #1f272f;
+  --muted-foreground: #9aa4af;
+  --accent: #232c35;
+  --destructive: #f0595e;
+  --border: #29323b;
+  --input: #343f4a;
+  --ring: #9d9cff;
+  --sunken: #12171c;
+  --faint: #6b7682;
+  --line-strong: #36414c;
+  --ok: #3dc48e;
+  --warn: #efae47;
+  --high: #f28a4f;
+  --crit: #f0595e;
+  --iris: #9d9cff;
+  --grid: rgb(226 230 234 / 0.04);
+  --grid-major: rgb(226 230 234 / 0.07);
+  --glow: 0.55;
+}
+
+@theme inline {
+  --font-sans: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sunken: var(--sunken);
+  --color-faint: var(--faint);
+  --color-line-strong: var(--line-strong);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-high: var(--high);
+  --color-crit: var(--crit);
+  --color-iris: var(--iris);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+    font-optical-sizing: auto;
+  }
+  a {
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+/* ── type ──────────────────────────────────────────────────────────────── */
+/* Archivo's width axis does the expressive work: condensed for the posture sentence and readouts. */
+@utility display {
+  font-stretch: 74%;
+  font-weight: 640;
+  letter-spacing: -0.012em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+@utility readout {
+  font-stretch: 66%;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── tones: every state-coloured element reads --tone ──────────────────── */
+@utility tone-ok {
+  --tone: var(--ok);
+}
+@utility tone-warn {
+  --tone: var(--warn);
+}
+@utility tone-high {
+  --tone: var(--high);
+}
+@utility tone-crit {
+  --tone: var(--crit);
+}
+@utility tone-iris {
+  --tone: var(--iris);
+}
+@utility tone-mute {
+  --tone: var(--faint);
+}
+
+/* ── monitor surface: ECG paper, 8 px minor / 40 px major ─────────────── */
+@utility ecg-paper {
+  background-color: var(--sunken);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:
+    40px 40px,
+    40px 40px,
+    8px 8px,
+    8px 8px;
+  background-position: -1px -1px;
+}
+
+@keyframes flect-halo {
+  0% {
+    r: 3.5px;
+    opacity: 0.55;
+  }
+  100% {
+    r: 14px;
+    opacity: 0;
+  }
+}
+@keyframes flect-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes flect-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes flect-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.trace-halo {
+  animation: flect-halo 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+.trace-reveal {
+  animation: flect-reveal 1.5s cubic-bezier(0.6, 0.05, 0.3, 1) both;
+}
+.rise {
+  animation: flect-rise 0.5s 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.blink {
+  animation: flect-blink 1.2s steps(2, jump-none) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-halo,
+  .blink {
+    animation: none;
+  }
+  .trace-reveal,
+  .rise {
+    animation: none;
+  }
+}
+
+/* ── report markdown ────────────────────────────────────────────────── */
+.prose-report {
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 72ch;
+}
+.prose-report h1,
+.prose-report h2,
+.prose-report h3,
+.prose-report h4 {
+  font-weight: 640;
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+}
+.prose-report h1 {
+  font-size: 22px;
+  font-stretch: 80%;
+  margin-top: 0;
+}
+.prose-report h2 {
+  font-size: 17px;
+}
+.prose-report h3 {
+  font-size: 15px;
+}
+.prose-report h4 {
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.prose-report p {
+  margin: 0.6em 0;
+}
+.prose-report ul,
+.prose-report ol {
+  margin: 0.6em 0;
+  padding-left: 1.3em;
+}
+.prose-report ul {
+  list-style: disc;
+}
+.prose-report ol {
+  list-style: decimal;
+}
+.prose-report li {
+  margin: 0.25em 0;
+}
+.prose-report li::marker {
+  color: var(--faint);
+}
+.prose-report a {
+  color: var(--iris);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-report code {
+  font-size: 12.5px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.05em 0.35em;
+}
+.prose-report pre {
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0.8em 0;
+}
+.prose-report pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.prose-report table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0.8em 0;
+  display: block;
+  overflow-x: auto;
+}
+.prose-report th,
+.prose-report td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 14px 7px 0;
+  text-align: left;
+  vertical-align: top;
+  min-width: 8ch;
+  max-width: 44ch;
+}
+.prose-report td code {
+  word-break: break-all;
+}
+.prose-report td:has(code) {
+  min-width: 22ch;
+}
+.prose-report th {
+  color: var(--muted-foreground);
+  font-weight: 560;
+}
+.prose-report blockquote {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+  color: var(--muted-foreground);
+}
+.prose-report hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}

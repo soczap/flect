@@ -60,13 +60,22 @@ flect/
   policy/              engine (act/modes/pause), rules, crashflow, cicd
   actuators/           git+gh, nft, deploy, sandbox, notify
   daemon.py            wiring + supervised loops + control socket
-  server.py, static/   read-only dashboard (127.0.0.1:1113)
+  server.py, static/   read-only dashboard (127.0.0.1:1113); static/ is built from web/
   cli.py               flect run | status | mode | unblock | pause | resume | keys
 deploy/
   flect.service        systemd --user unit
   vigil-uat.service    UAT instance on 127.0.0.1:8190
   root/                one-time privileged setup (nft table, helper, sudoers, AppArmor)
+web/                   dashboard source: React, Tailwind, shadcn/ui (npm run build → flect/static)
 tests/                 pytest suite (fakes for the model, GitHub, nft and deployer)
+```
+
+The built dashboard is committed in `flect/static/`, so running Flect never needs Node. After changing
+anything in `web/`, rebuild it; the running service picks up the new files on the next page load:
+
+```bash
+cd web && npm ci && npm run build      # writes flect/static/{index.html,app.js,app.css,assets/}
+npm run dev                            # live-reload on :5173, proxying /api to the running Flect
 ```
 
 ## Setup (DGX Spark, user `enterprise`)

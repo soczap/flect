@@ -8,3 +8,5 @@ flect.toml
 .env
 flect.egg-info/
 *.egg-info/
+web/node_modules/
+web/*.tsbuildinfo

@@ -15,7 +15,7 @@ flect = "flect.cli:main"
 include = ["flect*"]
 
 [tool.setuptools.package-data]
-flect = ["static/*", "db/*.sql"]
+flect = ["static/*", "static/assets/*", "db/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

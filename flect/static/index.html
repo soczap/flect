@@ -1,45 +1,24 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flect</title>
-<meta name="color-scheme" content="dark light">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%234c8dff'/%3E%3Cpath d='M12 19s5-2.5 5-6.5V7l-5-2-5 2v5.5c0 4 5 6.5 5 6.5z' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
-<script>
-  // Apply the saved theme before first paint (no flash). Storage can be unavailable; ignore errors.
-  try { const t = localStorage.getItem("flect-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-</script>
-<link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-<div class="app">
-  <aside class="side">
-    <div class="brand">
-      <div class="brand-mark"><svg class="i" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-      <div><div class="brand-name">Flect</div><div class="brand-sub" id="brand-sub">production guardian</div></div>
-    </div>
-    <nav class="nav" id="nav"></nav>
-    <div class="side-foot">
-      <div class="meta" id="foot-meta">…</div>
-      <button id="theme-btn" title="Toggle theme" aria-label="Toggle theme"></button>
-    </div>
-  </aside>
-  <main class="main">
-    <div class="topbar">
-      <h1 id="page-title">Overview</h1>
-      <span class="crumb" id="page-crumb"></span>
-      <span class="spacer"></span>
-      <span class="live" id="live"><span class="dot"></span><span id="live-text">connecting…</span></span>
-    </div>
-    <div id="view"></div>
-  </main>
-</div>
-<div class="scrim" id="scrim"></div>
-<aside class="drawer" id="drawer" aria-hidden="true">
-  <div class="drawer-h"><h3 id="drawer-title"></h3><button class="icon-btn" id="drawer-close" aria-label="Close">✕</button></div>
-  <div class="drawer-b" id="drawer-body"></div>
-</aside>
-<script src="/static/app.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flect</title>
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2313171c'/%3E%3Cpath d='M5.5 6.5 12 15.5l6.5-9' fill='none' stroke='%239d9cff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M5 18.5h14' stroke='%23e2e6ea' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <script>
+      // Resolve the theme before first paint: a saved choice wins, otherwise follow the OS.
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("flect-theme"); } catch (e) {}
+        if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <script type="module" crossorigin src="/static/app.js"></script>
+    <link rel="stylesheet" crossorigin href="/static/app.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
