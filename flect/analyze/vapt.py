@@ -22,8 +22,10 @@ from urllib.parse import urlsplit
 from flect.analyze.soc.scanner import scan_project
 from flect.gateway.llm import P_VAPT, build_messages
 
-PUBLIC_ROUTES = {"/api/health", "/api/auth/login", "/api/auth/logout", "/openapi.json", "/docs", "/redoc",
-                 "/docs/oauth2-redirect", "/"}
+PUBLIC_ROUTES = {"/api/health", "/api/ready", "/api/auth/login", "/api/auth/logout", "/openapi.json", "/docs",
+                 "/redoc", "/docs/oauth2-redirect", "/api/openapi.json", "/api/docs", "/api/docs/oauth2-redirect",
+                 "/api/redoc", "/"}
+SPEC_PATHS = ("/openapi.json", "/api/openapi.json", "/docs/openapi.json")
 SEV = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 SUMMARY_SCHEMA = {
@@ -84,10 +86,16 @@ def enforce_scope(target: str, uat_url: str, prod_ports: list[int]) -> tuple[str
     return t.hostname, t.port
 
 
+def vantage_source(host: str) -> tuple[str, int] | None:
+    """Probe from 127.0.0.2, not 127.0.0.1: apps often exempt exactly 127.0.0.1/::1 from auth (VIGIL does for
+    /metrics), which would hide what a remote attacker sees. All of 127.0.0.0/8 is local on Linux."""
+    return ("127.0.0.2", 0) if host in ("127.0.0.1", "localhost") else None
+
+
 def _get(host: str, port: int, path: str, timeout: float = 8.0) -> tuple[int, dict, bytes]:
     ctx = ssl.create_default_context()
     ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE   # self-signed UAT cert; TLS is assessed separately
-    conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
+    conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx, source_address=vantage_source(host))
     try:
         conn.request("GET", path, headers={"User-Agent": "flect-vapt/0.1 (read-only)", "Accept": "application/json"})
         resp = conn.getresponse()
@@ -100,7 +108,8 @@ def tls_check(host: str, port: int) -> list[VFinding]:
     out = []
     ctx = ssl.create_default_context()
     ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout=8) as sock, ctx.wrap_socket(sock, server_hostname=host) as tls:
+    with socket.create_connection((host, port), timeout=8, source_address=vantage_source(host)) as sock, \
+            ctx.wrap_socket(sock, server_hostname=host) as tls:
         version = tls.version()
         der = tls.getpeercert(binary_form=True)
     if version in {"TLSv1", "TLSv1.1", "SSLv3"}:
@@ -108,7 +117,8 @@ def tls_check(host: str, port: int) -> list[VFinding]:
                             "Clients can negotiate a deprecated protocol.", f"{host}:{port}", "Allow TLS 1.2+ only."))
     try:
         strict = ssl.create_default_context()
-        with socket.create_connection((host, port), timeout=8) as s, strict.wrap_socket(s, server_hostname=host):
+        with socket.create_connection((host, port), timeout=8, source_address=vantage_source(host)) as s, \
+                strict.wrap_socket(s, server_hostname=host):
             pass
     except ssl.SSLCertVerificationError as exc:
         out.append(VFinding("VA-TLS-002", "VA-TLS", "low", "Certificate is not publicly trusted",
@@ -126,10 +136,18 @@ def tls_check(host: str, port: int) -> list[VFinding]:
 
 
 def authz_sweep(host: str, port: int, public: set[str] = PUBLIC_ROUTES) -> tuple[list[VFinding], dict]:
-    status, _, body = _get(host, port, "/openapi.json")
-    if status != 200:
-        return [], {"name": "authz_sweep", "status": "not_run", "detail": f"/openapi.json returned {status}"}
-    spec = json.loads(body)
+    spec, tried = None, []
+    for spec_path in SPEC_PATHS:
+        status, _, body = _get(host, port, spec_path)
+        tried.append(f"{spec_path}={status}")
+        if status == 200:
+            try:
+                spec = json.loads(body)
+                break
+            except ValueError:
+                continue
+    if not spec or "paths" not in spec:
+        return [], {"name": "authz_sweep", "status": "not_run", "detail": "no OpenAPI schema found (" + ", ".join(tried) + ")"}
     findings, tested = [], 0
     for path, ops in sorted((spec.get("paths") or {}).items()):
         if "get" not in ops or "{" in path or path in public:
@@ -149,20 +167,32 @@ def authz_sweep(host: str, port: int, public: set[str] = PUBLIC_ROUTES) -> tuple
                                      f"Route errors on anonymous request: GET {path} → {st}",
                                      "Server error instead of a clean 401; may leak details or indicate a crash path.",
                                      path, "Check authentication before any processing."))
-    return findings, {"name": "authz_sweep", "status": "completed", "routes_tested": tested}
+    return findings, {"name": "authz_sweep", "status": "completed", "routes_tested": tested,
+                      "detail": "anonymous GET from 127.0.0.2 (remote vantage) to every parameter-free route"}
+
+
+TOOLING_PREFIXES = ("scripts/", "tests/", "tools/", "docs/", "benchmarks/")
 
 
 def static_scan(tree: str, osv: bool) -> tuple[list[VFinding], list[dict]]:
+    """Static findings in served code keep their severity. Findings in operator tooling (scripts/, tests/ …)
+    are not part of the deployed attack surface: they are kept in the report but capped at low."""
     result = scan_project(tree, "flect-vapt", "release", osv=osv)
     out = []
     for f in result["findings"]:
         if f.get("source_scope") == "test":
             continue
         loc = f.get("location") or {}
-        where = f"{loc.get('path')}:{loc.get('line')}" if loc.get("line") else (loc.get("path") or "")
-        out.append(VFinding(f"VA-STATIC:{f['rule_id']}:{where}", "VA-STATIC", f["severity"], f["title"],
+        path = loc.get("path") or ""
+        where = f"{path}:{loc.get('line')}" if loc.get("line") else path
+        severity, title = f["severity"], f["title"]
+        if path.startswith(TOOLING_PREFIXES) and SEV[severity] > SEV["low"]:
+            severity, title = "low", f"{title} (operator tooling, not served; was {f['severity']})"
+        out.append(VFinding(f"VA-STATIC:{f['rule_id']}:{where}", "VA-STATIC", severity, title,
                             f.get("description", "")[:400], where, f.get("remediation", "")[:300]))
-    return out, result["coverage"]
+    # scan_project's own HTTP/auth checks are not used here (VAPT runs its own), so drop their not_run rows.
+    coverage = [c for c in result["coverage"] if c["name"] not in ("http_posture", "authenticated_testing")]
+    return out, coverage
 
 
 def http_posture(host: str, port: int) -> tuple[list[VFinding], dict]:

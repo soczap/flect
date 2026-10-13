@@ -27,7 +27,8 @@ Environment=VIGIL_FACE_DET_MODEL=%h/VIGIL/models/frs/det_10g.onnx
 Environment=VIGIL_FACE_REC_MODEL=%h/VIGIL/models/frs/adaface_ir101_webface12m.onnx
 StandardOutput=append:%h/VIGIL-uat-data/logs/service.out
 StandardError=append:%h/VIGIL-uat-data/logs/service.out
-MemoryMax=6G
+MemoryMax=4G
+MemorySwapMax=0
 
 [Install]
 WantedBy=default.target

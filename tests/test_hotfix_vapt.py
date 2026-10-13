@@ -92,3 +92,13 @@ def test_full_vapt_report(https_app, tmp_path):
     assert not report.passed()                     # anonymous data route is high
     md = vapt.render(report)
     assert "VA-AUTHZ-001:/api/leaky" in md and "FAIL" in md
+
+
+def test_tooling_findings_are_capped(tmp_path):
+    (tmp_path / "scripts").mkdir(); (tmp_path / "vigil").mkdir()
+    (tmp_path / "scripts" / "ops.py").write_text("import os\ndef f(c):\n    os.system(c)\n")
+    (tmp_path / "vigil" / "api.py").write_text("import os\ndef f(c):\n    os.system(c)\n")
+    findings, cov = vapt.static_scan(str(tmp_path), False)
+    sev = {f.location.split(":")[0]: f.severity for f in findings if "PY-SHELL" in f.id}
+    assert sev == {"scripts/ops.py": "low", "vigil/api.py": "high"}
+    assert all(c["name"] not in ("http_posture", "authenticated_testing") for c in cov)
