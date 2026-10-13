@@ -19,6 +19,10 @@ class Probe:
     active_state: str | None
     n_restarts: int | None
     main_pid: int | None
+    uptime_s: float | None = None      # as reported by the service's own health endpoint, when it does
+
+
+_last_body: dict[str, bytes] = {}
 
 
 def http_health(url: str, path: str, timeout: float = 4.0) -> tuple[bool, int | None, float | None, str | None]:
@@ -40,6 +44,7 @@ def http_health(url: str, path: str, timeout: float = 4.0) -> tuple[bool, int | 
             conn.request("GET", path, headers={"User-Agent": "flect-health/0.1"})
             resp = conn.getresponse()
             body = resp.read(4096)
+            _last_body[url + path] = body
         finally:
             conn.close()
         latency = (time.monotonic() - started) * 1000
@@ -67,4 +72,11 @@ def unit_state(unit: str) -> tuple[str | None, int | None, int | None]:
 def probe(url: str, path: str, unit: str) -> Probe:
     ok, status, latency, err = http_health(url, path)
     state, restarts, pid = unit_state(unit)
-    return Probe(time.time(), ok, status, latency, err, state, restarts, pid)
+    uptime = None
+    if ok:
+        try:
+            import json
+            uptime = float(json.loads(_last_body.get(url + path, b"{}")).get("uptime_s"))
+        except (ValueError, TypeError, AttributeError):
+            uptime = None
+    return Probe(time.time(), ok, status, latency, err, state, restarts, pid, uptime)

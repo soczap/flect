@@ -72,6 +72,9 @@ class Flect:
         self.pending: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self.started = time.time()
         self.stale_skipped = 0
+        from collections import deque
+        self.health_hist: deque = deque(maxlen=720)     # (ts, ok, latency_ms)
+        self.traffic_hist: deque = deque(maxlen=720)    # (ts, rps, baseline, flooding)
         self.tasks: list[asyncio.Task] = []
 
     # ── log records (called from the tailer thread) ────────────────────────
@@ -149,7 +152,11 @@ class Flect:
                 await self.engine.on_block_request(req)
                 asyncio.create_task(self._narrate_dos(req))
             await self.engine.on_flood_change(self.dos.flooding)
-            self.db.set("dos:snapshot", self.dos.snapshot())
+            snap = self.dos.snapshot()
+            self.db.set("dos:snapshot", snap)
+            now_s = int(time.time())
+            if not self.traffic_hist or now_s - self.traffic_hist[-1][0] >= 5:
+                self.traffic_hist.append((now_s, snap["global_rps"], snap["baseline_rps"], snap["flooding"]))
 
     async def _narrate_dos(self, req) -> None:
         msgs = build_messages("dos_narrative", [{"id": req.rule_id, "reason": req.reason}],
@@ -168,6 +175,7 @@ class Flect:
         while True:
             p = await asyncio.to_thread(health_src.probe, t["prod_url"], t["health_path"], t["prod_unit"])
             self.db.set("health:prod", p.__dict__)
+            self.health_hist.append((round(p.ts), bool(p.http_ok), round(p.latency_ms, 1) if p.latency_ms else None))
             ev = self.crash.observe_probe(p, time.time())
             if ev:
                 await self.engine.on_crash(ev)
@@ -256,7 +264,7 @@ class Flect:
         server = await asyncio.start_unix_server(self._control, path=str(sock))
         os.chmod(sock, 0o600)
         dash = self.cfg["dashboard"]
-        uv = uvicorn.Server(uvicorn.Config(build_app(self.db, self.cfg, self.engine), host=dash["host"],
+        uv = uvicorn.Server(uvicorn.Config(build_app(self.db, self.cfg, self.engine, live=self), host=dash["host"],
                                            port=int(dash["port"]), log_level="warning", access_log=False))
         loops = {"logs": self.tailer.run, "dos": self._dos_tick, "health": self._health, "keys": self._keys,
                  "github": self.poller.run, "events": self._events, "housekeeping": self._housekeeping,
