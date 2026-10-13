@@ -23,6 +23,8 @@ local, offline LLM (DeepSeek-V4-Flash on llama.cpp) as its reasoning engine. It:
 The only autonomous merge into production is a verified crash hotfix. Everything else that reaches prod is
 merged by a human.
 
+For a tour of every feature, what sets it off and what it does, see [WALKTHROUGH.md](WALKTHROUGH.md).
+
 ## How it decides
 
 ```
