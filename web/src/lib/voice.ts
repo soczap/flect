@@ -10,6 +10,8 @@ export interface VoicePrefs {
   voice: string | null; // voiceURI
   rate: number;
   listenLang: string;
+  /** Who turns speech into text: this machine (Whisper on the Spark) or the browser's online service. */
+  ears: "local" | "browser";
 }
 
 const PREFS_KEY = "flect-voice";
@@ -20,7 +22,7 @@ function defaultListenLang() {
 }
 
 export function loadPrefs(): VoicePrefs {
-  const base: VoicePrefs = { muted: false, voice: null, rate: 1, listenLang: defaultListenLang() };
+  const base: VoicePrefs = { muted: false, voice: null, rate: 1, listenLang: defaultListenLang(), ears: "local" };
   try {
     return { ...base, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") as Partial<VoicePrefs>) };
   } catch {
@@ -284,4 +286,117 @@ export function listen(
   };
   rec.start();
   return () => rec.stop();
+}
+
+/* ── listening on this machine ─────────────────────────────────────────────
+ * Records one utterance from the microphone and hands back the audio, for Flect to transcribe locally. A
+ * simple voice-activity check calibrates to the room for a moment, waits for speech, and stops after a pause.
+ */
+export class MicError extends Error {}
+
+const MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+
+export const canRecord = () =>
+  typeof window !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+
+export class Recorder {
+  private stream: MediaStream | null = null;
+  private ctx: AudioContext | null = null;
+  private rec: MediaRecorder | null = null;
+  private timer = 0;
+  private discard = false;
+
+  /** Resolves with the recording when the speaker pauses (or stop() is called), or null if nothing was said. */
+  async start(onLevel: (level: number) => void): Promise<Blob | null> {
+    if (!canRecord()) throw new MicError("This page can't use the microphone. Open the dashboard as http://localhost or http://127.0.0.1.");
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+    } catch (e) {
+      const name = (e as DOMException).name;
+      throw new MicError(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "The microphone is blocked for this page. Allow it from the address bar, then tap the logo again."
+          : name === "NotFoundError"
+            ? "No microphone found on this computer."
+            : `The microphone could not start (${name}).`,
+      );
+    }
+    const mimeType = MIME.find((m) => MediaRecorder.isTypeSupported(m));
+    const rec = (this.rec = new MediaRecorder(this.stream, mimeType ? { mimeType } : undefined));
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+
+    const ctx = (this.ctx = new AudioContext());
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(this.stream).connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+
+    const started = performance.now();
+    let noise = 0;
+    let noiseN = 0;
+    let voiceMs = 0;
+    let quietMs = 0;
+    let heard = false;
+    const STEP = 50;
+
+    const done = new Promise<Blob | null>((resolve) => {
+      rec.onstop = () => {
+        this.release();
+        resolve(this.discard || !heard || !chunks.length ? null : new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+      };
+    });
+    rec.start(250);
+
+    this.timer = window.setInterval(() => {
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      const t = performance.now() - started;
+      if (t < 300) {
+        noise += rms; // the first moment is the room, not the speaker
+        noiseN++;
+        return;
+      }
+      const floor = noiseN ? noise / noiseN : 0;
+      const threshold = Math.max(0.012, floor * 2.6);
+      onLevel(Math.min(1, rms / (threshold * 4)));
+      if (rms > threshold) {
+        voiceMs += STEP;
+        quietMs = 0;
+        if (voiceMs >= 150) heard = true;
+      } else {
+        quietMs += STEP;
+        if (!heard) voiceMs = 0;
+      }
+      const pausedAfterSpeech = heard && quietMs >= 1300;
+      const nothingSaid = !heard && t > 8000;
+      if (pausedAfterSpeech || nothingSaid || t > 25000) this.stop();
+    }, STEP);
+    return done;
+  }
+
+  /** Stop now and keep what was said so far. */
+  stop() {
+    clearInterval(this.timer);
+    if (this.rec?.state === "recording") this.rec.stop();
+    else this.release();
+  }
+
+  /** Stop and throw the recording away. */
+  cancel() {
+    this.discard = true;
+    this.stop();
+  }
+
+  private release() {
+    clearInterval(this.timer);
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    void this.ctx?.close().catch(() => {});
+    this.ctx = null;
+  }
 }

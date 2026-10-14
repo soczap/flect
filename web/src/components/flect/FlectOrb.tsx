@@ -24,12 +24,15 @@ function Mark() {
 
 export function FlectOrb({
   state,
+  level = 0,
   onClick,
   label,
   ref,
   className,
 }: {
   state: OrbState;
+  /** Microphone level 0..1 while listening: a ring that swells with the operator's voice. */
+  level?: number;
   onClick?: () => void;
   label: string;
   ref?: Ref<OrbHandle>;
@@ -79,6 +82,11 @@ export function FlectOrb({
         <span ref={lift} className="orb-lift absolute inset-0 block">
           <span className="orb-ripple absolute inset-0 rounded-full" aria-hidden />
           <span className="orb-ripple orb-ripple-late absolute inset-0 rounded-full" aria-hidden />
+          <span
+            className="absolute inset-0 rounded-full bg-ok blur-[10px] transition-[transform,opacity] duration-100 ease-out"
+            style={{ transform: `scale(${1 + level * 0.2})`, opacity: state === "listening" ? 0.15 + level * 0.45 : 0 }}
+            aria-hidden
+          />
           <span ref={halo} className="absolute inset-0 rounded-full bg-iris opacity-0 blur-[18px]" aria-hidden />
           <span className="orb-sweep absolute -inset-[9px] rounded-full" aria-hidden />
           <span className="orb-face relative block size-full overflow-hidden rounded-full border bg-card">

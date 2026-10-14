@@ -126,7 +126,8 @@ flect resume
 
 Open the **Flect AI** page on the dashboard. Flect briefs you (spoken, with the logo bouncing as it talks) and
 puts any fixes it suggests in an approval tray. Say "yes", "go ahead" or "fix those issues", or tap Approve;
-say "no" to drop them. Ask follow-ups by typing, or tap the logo and speak (Chrome or Edge).
+say "no" to drop them. Ask follow-ups by typing, or tap the logo and speak: your voice is recorded until you
+pause and transcribed on the Spark by whisper.cpp (CPU only, `~/whisper.cpp`), so it never leaves the network.
 
 What it can do once you approve: re-run the key and service checks, restart or roll back production, retry a
 crash fix, block or unblock an IP, resolve an incident, change a guard's mode, and pause or resume GitHub
@@ -165,6 +166,7 @@ Reports (PR guard, VAPT, incidents) are written to `data/reports/` and shown on 
 - A crash caused by the environment (disk, memory, ports, unreachable services, certificates) gets a restart and a
   human. It does not get a code change.
 - Flect AI speaks with the browser's speech synthesis. Local voices stay on the machine; voices marked "online"
-  and voice input (speech recognition) go through the browser vendor's speech service.
+  go through the browser vendor's service. Voice input is transcribed on the Spark unless you switch it to the
+  browser's online service in voice settings.
 - Without the privileged setup, the sandbox is unavailable. Then the PR guard is static-only and never
   auto-merges, and fix-forward is skipped.

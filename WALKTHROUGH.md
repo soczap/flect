@@ -418,8 +418,10 @@ phone screen. Press **Ctrl K** (⌘K on a Mac) to jump to any page, open inciden
 production is safe, what happened since you were last here, and each issue that needs you with what Flect
 suggests. The Flect logo sits in a big circle and hops on every word it speaks; the caption under it follows
 along word by word. If nothing has changed since its last briefing, it just says so.
-- **Talk to it.** Type, or tap the logo (or the microphone) and speak. Tap the logo again, or press Esc, to
-  stop it talking. The speaker button mutes it; the settings button picks the voice, speed and your accent.
+- **Talk to it.** Type, or tap the logo (or the microphone) and speak; a green ring swells with your voice.
+  Pause and Flect stops recording on its own, transcribes it on the Spark with whisper.cpp, and answers. Tap
+  the logo, or press Esc, to stop it talking. The speaker button mutes it; the settings button picks the voice,
+  speed, and whether speech is transcribed on this machine (the default) or by the browser's online service.
 - **Approve fixes.** Suggestions wait in *Waiting for your approval*, each with its risk and reason. Approve
   or dismiss each one, or just say "yes", "go ahead", "fix those issues" (or "no"). Flect says what it is
   starting and then reads out the result when the action finishes.
@@ -503,7 +505,7 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 | `[llm]` | model URL, requests in flight, per-task timeouts, output and prompt limits |
 | `[sandbox]` | memory, CPU, process and time limits |
 | `[dashboard]` | host, port, `allowed_hosts` (loopback names the dashboard answers to) |
-| `[ai]` | `enabled`, `history_messages` sent back to the model, `proposal_ttl_min` (suggestion lifetime), `lookup_rounds` |
+| `[ai]` | `enabled`, `history_messages` sent back to the model, `proposal_ttl_min` (suggestion lifetime), `lookup_rounds`, `whisper_bin`, `whisper_model`, `whisper_threads`, `max_audio_s` |
 
 ## 17. What runs where
 
@@ -515,6 +517,7 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 | VIGIL production | `~/VIGIL`, `vigil.service`, `https://127.0.0.1:8090` |
 | VIGIL UAT | `~/VIGIL-uat`, `vigil-uat.service`, `https://127.0.0.1:8190`, started on demand |
 | DeepSeek | llama-server at `http://127.0.0.1:1111/v1` |
+| Voice input | whisper.cpp v1.8.2 in `~/whisper.cpp` (CPU build, `models/ggml-small.en.bin`), run per clip by Flect |
 | Firewall | nftables table `inet flect`, loaded at boot by `flect-nft.service` |
 | Reports | `~/flect/data/reports/` |
 | Dashboard source | `~/flect/web` (built into `flect/static`, see the README) |
@@ -529,7 +532,7 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 - Crashes with an environmental cause get a restart and a human, never a code change.
 - Without the privileged setup there is no sandbox, so the PR guard is static-only and never auto-merges,
   and fix-forward is skipped.
-- Flect AI uses the browser's speech. Local voices keep its words on your computer; "online" voices and voice
-  input go through the browser vendor's speech service (Google in Chrome, Microsoft in Edge). Typing and a
-  local voice keep everything on the network you control.
+- Flect AI speaks with the browser's voices. Local voices keep its words on your computer; "online" voices go
+  through the browser vendor's service. Your voice is transcribed on the Spark (whisper.cpp, small English
+  model, CPU) unless you pick the browser's online service, which many office networks block.
 - Flect AI answers can wait behind a long PR review: the model serves at most two requests at once.

@@ -12,6 +12,8 @@ import {
   approveAction,
   dismissAction,
   fetchMessages,
+  fetchSession,
+  transcribe,
   localContext,
   streamTurn,
   type AiAction,
@@ -20,7 +22,7 @@ import {
   type AiEvent,
   type AiMessage,
 } from "@/lib/ai";
-import { Speaker, canListen, englishVoices, listen, loadPrefs, onVoicesChanged, savePrefs, type VoicePrefs } from "@/lib/voice";
+import { Recorder, Speaker, canListen, englishVoices, listen, loadPrefs, onVoicesChanged, savePrefs, type VoicePrefs } from "@/lib/voice";
 import type { Tone } from "@/lib/vocab";
 import { FlectOrb, type OrbHandle, type OrbState } from "@/components/flect/FlectOrb";
 import { Led, Panel, Tag, Time } from "@/components/flect/bits";
@@ -200,6 +202,9 @@ export function AssistantView() {
   const [status, setStatus] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
+  const [ears, setEars] = useState<string | null>(null); // "local" when the Spark can transcribe, else why not
   const [interim, setInterim] = useState("");
   const [caption, setCaption] = useState<{ text: string; pos: number; word: [number, number] }>({ text: "", pos: 0, word: [0, 0] });
   const [blocked, setBlocked] = useState(false);
@@ -218,6 +223,7 @@ export function AssistantView() {
   const floorId = useRef<number | null>(null);
   const turningRef = useRef(false);
   const stopListen = useRef<(() => void) | null>(null);
+  const recorder = useRef<Recorder | null>(null);
 
   const speakerRef = useRef<Speaker | null>(null);
   if (!speakerRef.current) {
@@ -417,10 +423,14 @@ export function AssistantView() {
       if (alive) timer = window.setTimeout(() => void loop(false), fast.current ? 1500 : 5000);
     };
     void loop(true);
+    fetchSession()
+      .then((s) => alive && setEars(s.ears ?? null))
+      .catch(() => {});
     return () => {
       alive = false;
       clearTimeout(timer);
       speaker.stop();
+      recorder.current?.cancel();
       stopListen.current?.();
     };
   }, [speaker]);
@@ -436,6 +446,7 @@ export function AssistantView() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       speaker.stop();
+      recorder.current?.cancel();
       stopListen.current?.();
       setSettings(false);
     };
@@ -450,14 +461,52 @@ export function AssistantView() {
     };
   }, [speaker]);
 
-  /* listening */
+  /* listening: on this machine (Whisper on the Spark) by default, or the browser's online service */
+  const localEars = prefs.ears === "local" && ears === "local";
+
+  const listenHere = async () => {
+    speaker.stop();
+    setError(null);
+    setInterim("");
+    setListening(true);
+    const rec = (recorder.current = new Recorder());
+    stopListen.current = () => rec.stop();
+    let audio: Blob | null = null;
+    try {
+      audio = await rec.start(setLevel);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      recorder.current = null;
+      stopListen.current = null;
+      setListening(false);
+      setLevel(0);
+    }
+    if (!audio) return;
+    setTranscribing(true);
+    try {
+      const text = (await transcribe(audio)).trim();
+      if (text) void turnRef.current("chat", text);
+      else setError("I didn't catch that. Try again, a little closer to the microphone.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
   const toggleListen = () => {
     if (stopListen.current) {
       stopListen.current();
       return;
     }
+    if (transcribing) return;
+    if (localEars) {
+      void listenHere();
+      return;
+    }
     if (!canListen()) {
-      setError("This browser can't listen. Type below, or open Flect in Chrome or Edge.");
+      setError(ears && ears !== "local" ? `Voice input is unavailable here: ${ears}. Type below.` : "This browser can't listen. Type below.");
       inputRef.current?.focus();
       return;
     }
@@ -479,7 +528,9 @@ export function AssistantView() {
           code === "not-allowed" || code === "service-not-allowed"
             ? "The microphone is blocked for this page. Allow it from the address bar, or type instead."
             : code === "network"
-              ? "Speech recognition could not reach your browser's speech service. Type instead."
+              ? ears === "local"
+                ? "Your browser's online speech service is unreachable from this network. In voice settings, set speech recognition to “On this machine”."
+                : "Your browser's online speech service is unreachable from this network. Type instead."
               : `Listening stopped (${code}).`,
         );
       },
@@ -539,15 +590,15 @@ export function AssistantView() {
   const pending = actions.filter((a) => a.state === "proposed");
   const running = actions.filter((a) => a.state === "approved" || a.state === "running");
   const llmOk = core.status?.capabilities?.llm === "ok";
-  const orbState: OrbState = listening ? "listening" : speaking ? "speaking" : turning ? "thinking" : "idle";
+  const orbState: OrbState = listening ? "listening" : speaking ? "speaking" : turning || transcribing ? "thinking" : "idle";
   const secs = thinkingSince ? Math.max(0, Math.round((now - thinkingSince) / 1000)) : 0;
   const [lamp, line]: [Tone, string] =
     orbState === "listening"
-      ? ["ok", "Listening. Tap the logo when you're done."]
+      ? ["ok", localEars ? "Listening. Just pause when you're done." : "Listening. Tap the logo when you're done."]
       : orbState === "speaking"
         ? ["iris", prefs.muted ? "Speaking (muted)" : "Speaking. Tap the logo to stop."]
         : orbState === "thinking"
-          ? ["iris", `${status ?? (secs < 4 ? "Thinking" : "Reading production")}… ${secs}s`]
+          ? ["iris", transcribing && !turning ? "Writing down what you said…" : `${status ?? (secs < 4 ? "Thinking" : "Reading production")}… ${secs}s`]
           : llmOk || !core.status
             ? ["ok", "Ready. Tap the logo to talk."]
             : ["warn", "Language model offline. Flect can still run what you approve."];
@@ -574,6 +625,7 @@ export function AssistantView() {
               <VoiceSettings
                 prefs={prefs}
                 voices={voices}
+                ears={ears}
                 onChange={(p) => setPrefs((x) => ({ ...x, ...p }))}
                 onTest={() => {
                   speaker.stop();
@@ -584,7 +636,7 @@ export function AssistantView() {
             )}
           </div>
 
-          <FlectOrb ref={orb} state={orbState} onClick={onOrb} label={orbLabel} className="relative" />
+          <FlectOrb ref={orb} state={orbState} level={level} onClick={onOrb} label={orbLabel} className="relative" />
 
           <div className="relative mt-3 flex min-h-6 items-center gap-2 text-[13px] text-muted-foreground" role="status" aria-live="polite">
             <Led tone={lamp} pulse={orbState !== "idle"} />
@@ -760,8 +812,21 @@ export function AssistantView() {
   );
 }
 
-function VoiceSettings({ prefs, voices, onChange, onTest }: { prefs: VoicePrefs; voices: SpeechSynthesisVoice[]; onChange: (p: Partial<VoicePrefs>) => void; onTest: () => void }) {
+function VoiceSettings({
+  prefs,
+  voices,
+  ears,
+  onChange,
+  onTest,
+}: {
+  prefs: VoicePrefs;
+  voices: SpeechSynthesisVoice[];
+  ears: string | null;
+  onChange: (p: Partial<VoicePrefs>) => void;
+  onTest: () => void;
+}) {
   const field = "mt-1.5 h-9 w-full rounded-lg border bg-background px-2.5 text-[13px] font-[450] outline-none focus-visible:border-ring";
+  const local = ears === "local";
   return (
     <div className="absolute top-11 right-0 w-[min(320px,calc(100vw-48px))] space-y-4 rounded-xl border bg-popover p-4 text-left shadow-[0_16px_40px_-16px_rgb(0_0_0/0.45)]">
       <label className="block text-[12.5px] font-[580]">
@@ -780,20 +845,33 @@ function VoiceSettings({ prefs, voices, onChange, onTest }: { prefs: VoicePrefs;
         <input type="range" min={0.8} max={1.3} step={0.05} value={prefs.rate} onChange={(e) => onChange({ rate: Number(e.target.value) })} className="mt-2 block w-full accent-[var(--iris)]" />
       </label>
       <label className="block text-[12.5px] font-[580]">
-        I speak
-        <select value={prefs.listenLang} onChange={(e) => onChange({ listenLang: e.target.value })} className={field}>
-          {LISTEN_LANGS.map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
+        Speech recognition
+        <select value={local ? prefs.ears : "browser"} onChange={(e) => onChange({ ears: e.target.value as VoicePrefs["ears"] })} className={field}>
+          <option value="local" disabled={!local}>
+            On this machine (private){local ? "" : ", unavailable"}
+          </option>
+          <option value="browser">Browser speech service (online)</option>
         </select>
+        {!local && ears && <span className="mt-1 block text-[12px] font-[450] text-muted-foreground">{ears}</span>}
       </label>
+      {(!local || prefs.ears === "browser") && (
+        <label className="block text-[12.5px] font-[580]">
+          I speak
+          <select value={prefs.listenLang} onChange={(e) => onChange({ listenLang: e.target.value })} className={field}>
+            {LISTEN_LANGS.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <button type="button" onClick={onTest} className="inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-[13px] font-[560] hover:border-line-strong">
         <Volume2 className="size-4" /> Test the voice
       </button>
       <p className="text-[12px] leading-relaxed text-muted-foreground">
-        Voices without “online” speak on this computer. Online voices, and listening to your microphone, use your browser's speech service.
+        Voices without “online” speak on this computer. “On this machine” transcribes your voice on the Spark; the browser service sends it to Google or
+        Microsoft.
       </p>
     </div>
   );

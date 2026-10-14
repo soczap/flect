@@ -323,7 +323,7 @@ class Assistant:
             pending = self.pending()
             text = f"Welcome back. Nothing has changed since I briefed you {_ago(last['ts'])}."
             if pending:
-                text += (f" {_count(len(pending), 'suggestion is', 'suggestions are')} still waiting for you: "
+                text += (f" {_count(len(pending), 'suggestion is', 'suggestions are').capitalize()} still waiting for you: "
                          + "; ".join(a["title"].lower() for a in pending) + ". Say yes and I'll go ahead.")
             elif not (snapshot(self.live)["open_incidents"]):
                 text += " Production is quiet."

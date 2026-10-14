@@ -53,24 +53,38 @@ export class AiError extends Error {
   }
 }
 
+export interface AiSession {
+  token: string;
+  enabled: boolean;
+  /** "local" when Flect can transcribe speech itself, otherwise why it can't. */
+  ears?: string;
+  model?: string | null;
+}
+
 let token: string | null = null;
 
+export async function fetchSession(): Promise<AiSession> {
+  const s = await api<AiSession>("/api/ai/session");
+  token = s.token;
+  return s;
+}
+
 async function sessionToken(fresh = false): Promise<string> {
-  if (!token || fresh) token = (await api<{ token: string }>("/api/ai/session")).token;
+  if (!token || fresh) token = (await fetchSession()).token;
   return token;
 }
 
 /** POST with the session token. A 403 usually means Flect restarted (new token): fetch it once and retry. */
-async function post(path: string, body?: unknown, retry = true): Promise<Response> {
+async function post(path: string, body?: unknown, retry = true, contentType = "application/json"): Promise<Response> {
   const r = await fetch(path, {
     method: "POST",
     cache: "no-store",
-    headers: { "Content-Type": "application/json", "X-Flect-Token": await sessionToken() },
-    body: JSON.stringify(body ?? {}),
+    headers: { "Content-Type": contentType, "X-Flect-Token": await sessionToken() },
+    body: body instanceof Blob ? body : JSON.stringify(body ?? {}),
   });
   if (r.status === 403 && retry) {
     await sessionToken(true);
-    return post(path, body, false);
+    return post(path, body, false, contentType);
   }
   return r;
 }
@@ -109,6 +123,13 @@ export async function streamTurn(path: "/api/ai/chat" | "/api/ai/brief", body: o
     }
   }
   if (buf.trim()) onEvent(JSON.parse(buf) as AiEvent);
+}
+
+/** Send a recorded clip; Flect transcribes it on the Spark and returns the text. */
+export async function transcribe(audio: Blob): Promise<string> {
+  const r = await post("/api/ai/transcribe", audio, true, audio.type || "audio/webm");
+  if (!r.ok) throw await failure(r);
+  return ((await r.json()) as { text: string }).text;
 }
 
 export const fetchMessages = () => api<{ messages: AiMessage[] } & AiCounts>("/api/ai/messages");

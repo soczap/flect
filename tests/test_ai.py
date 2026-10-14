@@ -126,7 +126,7 @@ def test_briefing_streams_and_stores_checked_proposals(cfg, db):
     # Nothing changed: Flect says so without another model call, and the suggestion is still on offer.
     assert len(client.calls) == 1
     welcome = final(again)
-    assert welcome["kind"] == "welcome" and "still waiting" in welcome["text"]
+    assert welcome["kind"] == "welcome" and "ago. One suggestion is still waiting" in welcome["text"]
 
 
 def test_yes_runs_pending_suggestions_through_the_audited_operator_path(cfg, db):

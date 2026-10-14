@@ -70,7 +70,9 @@ class Flect:
         self.poller = GitHubPoller(self.db, gh["repo"], gh["poll_interval_s"], self.engine.on_pr, self.engine.on_branch_move,
                                    self.engine.on_human_approval, gh.get("approvers"))
         from flect.ai.assistant import Assistant
+        from flect.ai.ears import Ears
         self.ai = Assistant(self) if cfg["ai"].get("enabled", True) else None
+        self.ears = Ears(cfg) if self.ai else None
         self.pending: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self.started = time.time()
         self.stale_skipped = 0

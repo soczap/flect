@@ -6,6 +6,7 @@ same-origin request; every request must also name a loopback host, which blocks 
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import secrets
@@ -242,9 +243,29 @@ def build_app(db, cfg, engine=None, live=None) -> FastAPI:
 
     @app.get("/api/ai/session")
     def ai_session():
-        a = getattr(live, "ai", None)
-        return {"token": token, "enabled": a is not None,
+        a, ears = getattr(live, "ai", None), getattr(live, "ears", None)
+        return {"token": token, "enabled": a is not None, "ears": ears.status() if ears else "voice input is off",
                 "model": (db.get("status:capabilities") or {}).get("llm"), **(a.counts() if a else {})}
+
+    @app.post("/api/ai/transcribe")
+    async def ai_transcribe(request: Request):
+        """Audio clip in, text out, transcribed on this machine."""
+        from flect.ai.ears import AUDIO_TYPES, MAX_BYTES, TranscriptionError
+        ears = getattr(live, "ears", None)
+        if ears is None:
+            raise HTTPException(503, "Voice input is not running in this process.")
+        kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        if kind not in AUDIO_TYPES:
+            raise HTTPException(415, f"Send audio ({', '.join(sorted(AUDIO_TYPES))}).")
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio += chunk
+            if len(audio) > MAX_BYTES:
+                raise HTTPException(413, "That recording is too long.")
+        try:
+            return {"text": await asyncio.to_thread(ears.transcribe, bytes(audio), kind)}
+        except TranscriptionError as exc:
+            raise HTTPException(503, f"Could not transcribe: {exc}") from None
 
     @app.get("/api/ai/messages")
     def ai_messages(after: int = 0):

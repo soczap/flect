@@ -81,6 +81,11 @@ DEFAULTS: dict = {
         "history_messages": 14,       # conversation messages sent back to the model each turn
         "proposal_ttl_min": 360,      # a suggestion older than this can no longer be approved
         "lookup_rounds": 2,           # extra model rounds allowed for fetching incident/log/report detail
+        # Voice input is transcribed here by whisper.cpp (CPU), never by an online service.
+        "whisper_bin": "~/whisper.cpp/build/bin/whisper-cli",
+        "whisper_model": "~/whisper.cpp/models/ggml-small.en.bin",
+        "whisper_threads": 8,
+        "max_audio_s": 30,
     },
     "sandbox": {
         "bwrap": "/usr/local/lib/flect/bwrap",
