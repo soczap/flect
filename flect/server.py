@@ -1,23 +1,68 @@
-"""Read-only dashboard on 127.0.0.1. No endpoint changes state; use the `flect` CLI for that."""
+"""Dashboard on 127.0.0.1.
+
+Everything is read-only except the Flect AI console (/api/ai/*), where the operator talks to Flect and approves
+the actions it suggests. Those write endpoints need the per-start session token from /api/ai/session and a
+same-origin request; every request must also name a loopback host, which blocks DNS-rebinding pages.
+"""
 from __future__ import annotations
 
+import hmac
 import json
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from flect import __version__
 from flect.config import CAPABILITIES
 
 STATIC = Path(__file__).with_name("static")
+SAFE_METHODS = {"GET", "HEAD"}
+
+
+def host_name(value: str) -> str:
+    """'localhost:1113' → 'localhost', '[::1]:1113' → '::1'."""
+    value = (value or "").strip().lower()
+    if value.startswith("["):
+        return value[1:value.find("]")] if "]" in value else value
+    return value.split(":")[0]
+
+
+class LoopbackGuard:
+    """ASGI middleware: refuse foreign Host names, and writes without the session token or from another origin."""
+
+    def __init__(self, app, allowed: set[str], token: str):
+        self.app, self.allowed, self.token = app, allowed, token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        host = headers.get("host", "")
+        why = None
+        if host_name(host) not in self.allowed:
+            why = "Flect answers only on its loopback address."
+        elif scope["method"] not in SAFE_METHODS:
+            origin = headers.get("origin")
+            if origin and urlsplit(origin).netloc.lower() != host.lower():
+                why = "Cross-origin request refused."
+            elif not hmac.compare_digest(headers.get("x-flect-token", ""), self.token):
+                why = "Missing or stale Flect session token. Reload the page."
+        if why:
+            return await PlainTextResponse(why, status_code=403)(scope, receive, send)
+        return await self.app(scope, receive, send)
 
 
 def build_app(db, cfg, engine=None, live=None) -> FastAPI:
     app = FastAPI(title="Flect", docs_url=None, redoc_url=None, openapi_url=None)
+    token = secrets.token_urlsafe(32)
+    allowed = {h.lower() for h in cfg["dashboard"].get("allowed_hosts", ["127.0.0.1", "localhost", "::1"])}
+    app.add_middleware(LoopbackGuard, allowed=allowed, token=token)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     def since(hours: float) -> str:
@@ -80,6 +125,8 @@ def build_app(db, cfg, engine=None, live=None) -> FastAPI:
             "reports_by_kind": {r["kind"]: r["n"] for r in db.all("SELECT kind, COUNT(*) n FROM reports GROUP BY kind")},
             "rollbacks_24h": (db.one("SELECT COUNT(*) n FROM deployments WHERE trigger='rollback' AND started_ts > ?", (day,)) or {}).get("n", 0),
             "had_failure_1h": bool(last_fail),
+            "ai_pending": (db.one("SELECT COUNT(*) n FROM ai_actions WHERE state='proposed' AND created_ts > ?",
+                                  (since(cfg["ai"]["proposal_ttl_min"] / 60),)) or {}).get("n", 0),
             "now": time.time(),
         }
 
@@ -164,5 +211,79 @@ def build_app(db, cfg, engine=None, live=None) -> FastAPI:
     @app.get("/api/audit/verify")
     def audit_verify():
         return {"chain_ok": db.verify_audit_chain()}
+
+    # ── Flect AI console ───────────────────────────────────────────────────
+    def assistant():
+        a = getattr(live, "ai", None)
+        if a is None:
+            raise HTTPException(503, "Flect AI is not running in this process")
+        return a
+
+    def local(body: dict) -> dict:
+        return {"local_time": str(body.get("local_time") or "")[:80], "tz": str(body.get("tz") or "")[:64]}
+
+    def stream(queue) -> StreamingResponse:
+        """Newline-delimited JSON events until 'done'. If the browser goes away the turn still completes."""
+        async def events():
+            while True:
+                ev = await queue.get()
+                yield json.dumps(ev, default=str) + "\n"
+                if ev.get("type") == "done":
+                    return
+        return StreamingResponse(events(), media_type="application/x-ndjson",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    async def body_of(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        return body if isinstance(body, dict) else {}
+
+    @app.get("/api/ai/session")
+    def ai_session():
+        a = getattr(live, "ai", None)
+        return {"token": token, "enabled": a is not None,
+                "model": (db.get("status:capabilities") or {}).get("llm"), **(a.counts() if a else {})}
+
+    @app.get("/api/ai/messages")
+    def ai_messages(after: int = 0):
+        a = assistant()
+        return {"messages": a.messages(after), **a.counts()}
+
+    @app.post("/api/ai/chat")
+    async def ai_chat(request: Request):
+        a, body = assistant(), await body_of(request)
+        text = str(body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "Say something first.")
+        if a.busy:
+            raise HTTPException(409, "Flect is still answering.")
+        return stream(a.chat(text, local(body)))
+
+    @app.post("/api/ai/brief")
+    async def ai_brief(request: Request):
+        a, body = assistant(), await body_of(request)
+        if a.busy:
+            raise HTTPException(409, "Flect is still answering.")
+        return stream(a.brief(local(body), force=bool(body.get("force"))))
+
+    @app.post("/api/ai/actions/{action_id}/approve")
+    async def ai_approve(action_id: int):
+        try:
+            return await assistant().approve(action_id)
+        except LookupError:
+            raise HTTPException(404, "No such suggestion.") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/api/ai/actions/{action_id}/dismiss")
+    def ai_dismiss(action_id: int):
+        try:
+            return assistant().dismiss(action_id)
+        except LookupError:
+            raise HTTPException(404, "No such suggestion.") from None
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
 
     return app

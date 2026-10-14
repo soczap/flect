@@ -81,6 +81,9 @@ const DECISION: Record<string, string> = {
   deploy_uat: "Deployed to UAT",
   pause_github_writes: "Paused GitHub writes",
   resume_github_writes: "Resumed GitHub writes",
+  recheck_services: "Re-ran key and service checks",
+  resolve_incident: "Resolved an incident",
+  retry_fix: "Retried a crash fix",
 };
 export function decisionText(a: Pick<Action, "decision">): string {
   const d = a.decision || "";
@@ -89,12 +92,12 @@ export function decisionText(a: Pick<Action, "decision">): string {
   return DECISION[d] ?? sentence(d);
 }
 
-/** done / would-do (observe mode) / failed / still running */
+/** done / would-do (observe mode) / failed / still running. "operator" = approved in Flect AI. */
 export function actionOutcome(a: Pick<Action, "mode" | "ok">): { tone: Tone; label: string } {
   if (a.mode === "observe") return { tone: "warn", label: "Would do" };
   if (a.ok === 0) return { tone: "crit", label: "Failed" };
   if (a.ok == null) return { tone: "mute", label: "Started" };
-  return { tone: "iris", label: "Done" };
+  return { tone: "iris", label: a.mode === "operator" ? "Done, approved by you" : "Done" };
 }
 
 export const TRIGGER: Record<string, string> = {
@@ -103,6 +106,7 @@ export const TRIGGER: Record<string, string> = {
   human_merge: "Release merged by a human",
   hotfix: "Crash hotfix",
   rollback: "Automatic rollback",
+  operator_rollback: "Rollback you approved in Flect AI",
   restart: "Restart",
   uat_merge: "Merged into UAT",
 };

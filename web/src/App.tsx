@@ -7,6 +7,7 @@ import { Shell } from "@/components/shell/Shell";
 import { CommandMenu, useCommandHotkey } from "@/components/shell/CommandMenu";
 import { IncidentDrawer, ReportDrawer } from "@/components/flect/Drawers";
 import { OverviewView } from "@/views/Overview";
+import { AssistantView } from "@/views/Assistant";
 import { IncidentsView } from "@/views/Incidents";
 import { PullRequestsView } from "@/views/PullRequests";
 import { TrafficView } from "@/views/Traffic";
@@ -18,6 +19,7 @@ import { SettingsView } from "@/views/Settings";
 
 const VIEWS: Record<ViewId, ComponentType> = {
   overview: OverviewView,
+  ai: AssistantView,
   incidents: IncidentsView,
   prs: PullRequestsView,
   traffic: TrafficView,

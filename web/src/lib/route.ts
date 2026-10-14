@@ -1,7 +1,7 @@
 /* Hash router: #/incidents/11 → { view: "incidents", arg: "11" }. Deep links survive reloads. */
 import { useSyncExternalStore } from "react";
 
-export const VIEW_IDS = ["overview", "incidents", "prs", "traffic", "deploys", "keys", "reports", "audit", "settings"] as const;
+export const VIEW_IDS = ["overview", "ai", "incidents", "prs", "traffic", "deploys", "keys", "reports", "audit", "settings"] as const;
 export type ViewId = (typeof VIEW_IDS)[number];
 
 const EVENT = "flect:route";

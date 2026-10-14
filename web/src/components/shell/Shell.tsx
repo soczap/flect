@@ -2,6 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity,
+  AudioLines,
   FileText,
   GitCommitHorizontal,
   GitPullRequest,
@@ -34,7 +35,13 @@ export interface NavItem {
 }
 
 export const NAV: { group: string | null; items: NavItem[] }[] = [
-  { group: null, items: [{ id: "overview", label: "Overview", icon: LayoutGrid, blurb: "Is production safe right now" }] },
+  {
+    group: null,
+    items: [
+      { id: "overview", label: "Overview", icon: LayoutGrid, blurb: "Is production safe right now" },
+      { id: "ai", label: "Flect AI", icon: AudioLines, blurb: "Talk to Flect about production and approve fixes" },
+    ],
+  },
   {
     group: "Watching",
     items: [
@@ -88,6 +95,7 @@ function counts(core: ReturnType<typeof useCore>): Partial<Record<ViewId, [numbe
   if (!o) return {};
   const keysBad = (o.keys.failing ?? 0) + (o.keys.expired ?? 0);
   return {
+    ai: [o.ai_pending ?? 0, "iris"],
     incidents: [o.open_incident_total, o.open_incidents.critical ? "crit" : "warn"],
     traffic: [o.active_blocks, "iris"],
     keys: [keysBad, "crit"],

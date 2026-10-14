@@ -19,6 +19,9 @@ local, offline LLM (DeepSeek-V4-Flash on llama.cpp) as its reasoning engine. It:
    regresses.
 5. **Is the pipeline.** It polls GitHub, guards, merges, deploys UAT, smoke-tests, runs VAPT, deploys prod after
    the human merge, and watches. It also checks **API keys, tokens and certificates for expiry** every hour.
+6. **Talks to you.** The **Flect AI** page briefs you aloud on what happened, what is wrong and what it
+   suggests. Ask it anything by voice or text. When you say "yes" (or tap Approve), it runs the fixes it
+   proposed, from a fixed list of operator actions, and reads you the result.
 
 The only autonomous merge into production is a verified crash hotfix. Everything else that reaches prod is
 merged by a human.
@@ -40,7 +43,9 @@ For a tour of every feature, what sets it off and what it does, see [WALKTHROUGH
 ```
 
 - **The LLM proposes; deterministic code decides.** Model output is schema-validated data. It cannot call
-  tools, cannot clear a deterministic block, and never triggers an action directly.
+  tools, cannot clear a deterministic block, and never triggers an action directly. In Flect AI it can
+  *suggest* an action from a fixed catalog; that runs only after you approve it, is re-checked against live
+  state first, and goes through the same audited engine path.
 - **Observe first.** Every capability ships in `observe` mode, which records what it *would* do. Turn on one
   capability at a time with `flect mode <capability> enforce`.
 - **Every action is audited** in a hash-chained log (`/api/audit/verify`).
@@ -117,6 +122,21 @@ flect pause "maintenance"    # stop all GitHub writes; detection and blocking co
 flect resume
 ```
 
+### Flect AI
+
+Open the **Flect AI** page on the dashboard. Flect briefs you (spoken, with the logo bouncing as it talks) and
+puts any fixes it suggests in an approval tray. Say "yes", "go ahead" or "fix those issues", or tap Approve;
+say "no" to drop them. Ask follow-ups by typing, or tap the logo and speak (Chrome or Edge).
+
+What it can do once you approve: re-run the key and service checks, restart or roll back production, retry a
+crash fix, block or unblock an IP, resolve an incident, change a guard's mode, and pause or resume GitHub
+writes. These run whatever the guard's mode (modes govern what Flect does *on its own*) and are audited with
+mode `operator`. It cannot restart services Flect does not manage (FRS, Ollama, DeepSeek) or rotate tokens;
+it tells you what to do instead. Suggestions expire after 6 hours.
+
+The page's write endpoints (`/api/ai/*`) need a per-start session token and a same-origin request, and the
+whole dashboard only answers to loopback host names, so another web page cannot drive it.
+
 ### Overriding a needs-human verdict
 
 `uat` and `main` are branch-protected: GitHub refuses a merge unless `flect/pr-guard`, `flect/secrets` and
@@ -144,5 +164,7 @@ Reports (PR guard, VAPT, incidents) are written to `data/reports/` and shown on 
   rollback-first, and auto-rollback after a bad hotfix, not the model being right.
 - A crash caused by the environment (disk, memory, ports, unreachable services, certificates) gets a restart and a
   human. It does not get a code change.
+- Flect AI speaks with the browser's speech synthesis. Local voices stay on the machine; voices marked "online"
+  and voice input (speech recognition) go through the browser vendor's speech service.
 - Without the privileged setup, the sandbox is unavailable. Then the PR guard is static-only and never
   auto-merges, and fix-forward is skipped.

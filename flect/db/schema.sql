@@ -50,3 +50,15 @@ CREATE TABLE IF NOT EXISTS actions (
   id INTEGER PRIMARY KEY, ts TEXT NOT NULL, decision TEXT NOT NULL, target TEXT NOT NULL,
   params TEXT NOT NULL, mode TEXT NOT NULL, ok INTEGER, result TEXT, incident_id INTEGER,
   prev_hash TEXT NOT NULL, hash TEXT NOT NULL);
+
+-- Flect AI console: the conversation, and the actions the model proposed (run only after operator approval).
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id INTEGER PRIMARY KEY, ts TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('operator','flect','event')),
+  kind TEXT, text TEXT NOT NULL, meta TEXT NOT NULL DEFAULT '{}');
+
+CREATE TABLE IF NOT EXISTS ai_actions (
+  id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL, action TEXT NOT NULL, args TEXT NOT NULL,
+  title TEXT NOT NULL, why TEXT, risk TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('proposed','refused','approved','running','done','failed','dismissed','expired')),
+  created_ts TEXT NOT NULL, decided_ts TEXT, finished_ts TEXT, result TEXT);
+CREATE INDEX IF NOT EXISTS ai_actions_state ON ai_actions(state);

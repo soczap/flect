@@ -250,6 +250,84 @@
   }
 }
 
+/* ── Flect AI orb ───────────────────────────────────────────────────── */
+/* Idle: breathes. Thinking: an iris arc sweeps the rim. Listening: jade ripples. Speaking: lit rim, and the
+   component hops the face on every word (FlectOrb.bounce). */
+@keyframes flect-orb-breathe {
+  50% {
+    transform: scale(1.014);
+  }
+}
+@keyframes flect-orb-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes flect-orb-ripple {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.42);
+    opacity: 0;
+  }
+}
+.orb-face {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 18px 50px -18px rgb(0 0 0 / calc(var(--glow) * 0.9));
+  transition: box-shadow 0.35s ease;
+}
+.orb[data-state="speaking"] .orb-face {
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--iris) 70%, transparent),
+    0 0 46px 2px color-mix(in oklab, var(--iris) calc(var(--glow) * 70%), transparent);
+}
+.orb[data-state="listening"] .orb-face {
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--ok) 75%, transparent),
+    0 0 40px color-mix(in oklab, var(--ok) calc(var(--glow) * 60%), transparent);
+}
+.orb[data-state="idle"] .orb-lift {
+  animation: flect-orb-breathe 5.5s ease-in-out infinite;
+}
+.orb-sweep {
+  opacity: 0;
+  background: conic-gradient(from 0deg, transparent 0 62%, color-mix(in oklab, var(--iris) 60%, transparent) 88%, var(--iris) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  transition: opacity 0.3s ease;
+}
+.orb[data-state="thinking"] .orb-sweep {
+  opacity: 1;
+  animation: flect-orb-spin 1.5s linear infinite;
+}
+.orb-ripple {
+  opacity: 0;
+  border: 2px solid var(--ok);
+}
+.orb[data-state="listening"] .orb-ripple {
+  animation: flect-orb-ripple 1.9s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+.orb[data-state="listening"] .orb-ripple-late {
+  animation-delay: 0.95s;
+}
+.orb-floor {
+  background: radial-gradient(closest-side, rgb(0 0 0 / calc(0.12 + var(--glow) * 0.25)), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb .orb-lift,
+  .orb .orb-sweep,
+  .orb .orb-ripple {
+    animation: none !important;
+  }
+  .orb[data-state="thinking"] .orb-sweep {
+    opacity: 0.6;
+  }
+}
+
 /* ── report markdown ────────────────────────────────────────────────── */
 .prose-report {
   font-size: 14px;

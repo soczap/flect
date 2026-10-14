@@ -17,9 +17,9 @@ DEFAULTS: dict = {
     "llm": {
         "base_url": "http://127.0.0.1:1111/v1",
         "max_in_flight": 2,
-        "timeouts_s": {"crash": 900, "prguard": 1200, "vapt": 1800, "narrative": 300},
-        "max_output_tokens": {"crash": 4096, "prguard": 1500, "vapt": 2000, "narrative": 600},
-        "max_prompt_chars": {"crash": 96000, "prguard": 72000, "vapt": 48000, "narrative": 18000},
+        "timeouts_s": {"crash": 900, "prguard": 1200, "vapt": 1800, "narrative": 300, "assistant": 300},
+        "max_output_tokens": {"crash": 4096, "prguard": 1500, "vapt": 2000, "narrative": 600, "assistant": 900},
+        "max_prompt_chars": {"crash": 96000, "prguard": 72000, "vapt": 48000, "narrative": 18000, "assistant": 60000},
     },
     "github": {
         "repo": "soczap/Computer_Vision",
@@ -73,7 +73,15 @@ DEFAULTS: dict = {
         "post_deploy_watch_minutes": 10,
     },
     "keys": {"interval_s": 3600, "warn_days": [7, 3, 1], "cert_warn_days": 30, "extra": []},
-    "dashboard": {"host": "127.0.0.1", "port": 1113},
+    # allowed_hosts: Host names the dashboard answers to (DNS-rebinding guard). Loopback only by default.
+    "dashboard": {"host": "127.0.0.1", "port": 1113, "allowed_hosts": ["127.0.0.1", "localhost", "::1"]},
+    # Flect AI: the operator console. The model proposes actions; nothing runs until the operator approves it.
+    "ai": {
+        "enabled": True,
+        "history_messages": 14,       # conversation messages sent back to the model each turn
+        "proposal_ttl_min": 360,      # a suggestion older than this can no longer be approved
+        "lookup_rounds": 2,           # extra model rounds allowed for fetching incident/log/report detail
+    },
     "sandbox": {
         "bwrap": "/usr/local/lib/flect/bwrap",
         "memory_max": "2G",

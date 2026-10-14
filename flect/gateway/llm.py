@@ -4,6 +4,7 @@
 - Priority queue with a hard cap on concurrent requests (the model's KV pool is shared).
 - Every call is schema-constrained (response_format json_schema) and re-validated here.
 - No `tools` array is ever sent: the model can only return data, never request actions.
+- Optional streaming (`on_delta`) for the operator console, so Flect can start speaking before it finishes.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import asyncio
 import itertools
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -21,6 +23,7 @@ from flect.db import DB, now
 from flect.redact import redact
 
 P_CRASH, P_PRGUARD, P_VAPT, P_NARRATIVE = 0, 1, 2, 3
+P_ASSIST = P_PRGUARD      # an operator is waiting on the answer
 
 BASE_SYSTEM_PROMPT = (
     "You are the analysis component of Flect, a system that protects a production application. "
@@ -74,17 +77,52 @@ class ModelClient:
         except Exception:
             return False
 
-    def chat(self, messages: list[dict], schema: dict, name: str, max_tokens: int, timeout: float) -> dict:
-        payload = {
+    @staticmethod
+    def _payload(messages: list[dict], schema: dict, name: str, max_tokens: int, temperature: float) -> dict:
+        return {
             "messages": messages,
-            "temperature": 0,
+            "temperature": temperature,
             "max_tokens": max_tokens,
             "cache_prompt": True,
             "chat_template_kwargs": {"enable_thinking": False},
             "response_format": {"type": "json_schema",
                                 "json_schema": {"name": name, "strict": True, "schema": schema}},
         }
-        return self._request(self.base_url + "/chat/completions", payload, timeout)
+
+    def chat(self, messages: list[dict], schema: dict, name: str, max_tokens: int, timeout: float,
+             temperature: float = 0) -> dict:
+        return self._request(self.base_url + "/chat/completions",
+                             self._payload(messages, schema, name, max_tokens, temperature), timeout)
+
+    def chat_stream(self, messages: list[dict], schema: dict, name: str, max_tokens: int, timeout: float,
+                    on_delta: Callable[[str], None], temperature: float = 0) -> dict:
+        """Like chat(), but calls on_delta(fragment) as the model writes. Returns the same shape as chat()."""
+        payload = self._payload(messages, schema, name, max_tokens, temperature)
+        payload.update(stream=True, stream_options={"include_usage": True})
+        req = Request(self.base_url + "/chat/completions", data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"})
+        parts: list[str] = []
+        usage: dict = {}
+        size = 0
+        with self.opener.open(req, timeout=timeout) as resp:
+            for raw in resp:
+                size += len(raw)
+                if size > 4_000_000:
+                    raise ValueError("model response exceeded limit")
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                usage = chunk.get("usage") or usage
+                for choice in chunk.get("choices") or []:
+                    piece = (choice.get("delta") or {}).get("content")
+                    if piece:
+                        parts.append(piece)
+                        on_delta(piece)
+        return {"choices": [{"message": {"content": "".join(parts)}}], "usage": usage}
 
 
 @dataclass(order=True)
@@ -99,6 +137,8 @@ class _Job:
     ref: str | None = field(compare=False)
     call_id: int = field(compare=False)
     future: asyncio.Future = field(compare=False)
+    temperature: float = field(default=0, compare=False)
+    on_delta: Callable[[str | None], None] | None = field(default=None, compare=False)
 
 
 def build_messages(task: str, findings: list[dict], context: dict, untrusted: dict,
@@ -140,10 +180,17 @@ class Gateway:
         return {"queued": self.queue.qsize(), "in_flight": self.in_flight}
 
     async def ask(self, task: str, priority: int, messages: list[dict], schema: dict,
-                  max_tokens: int | None = None, timeout: float | None = None, ref: str | None = None) -> dict:
-        kind = {P_CRASH: "crash", P_PRGUARD: "prguard", P_VAPT: "vapt"}.get(priority, "narrative")
+                  max_tokens: int | None = None, timeout: float | None = None, ref: str | None = None,
+                  kind: str | None = None, temperature: float = 0,
+                  on_delta: Callable[[str | None], None] | None = None) -> dict:
+        """`on_delta` receives output fragments as they stream, and None when a failed attempt is discarded
+        before a retry. It is always called on the event loop."""
+        kind = kind or {P_CRASH: "crash", P_PRGUARD: "prguard", P_VAPT: "vapt"}.get(priority, "narrative")
         max_tokens = max_tokens or self.cfg["max_output_tokens"][kind]
         timeout = timeout or self.cfg["timeouts_s"][kind]
+        if on_delta is not None:
+            loop, deliver = asyncio.get_running_loop(), on_delta
+            on_delta = lambda piece: loop.call_soon_threadsafe(deliver, piece)  # noqa: E731 — worker threads call it
         # Shed low-value work while crash diagnosis is waiting.
         if priority >= P_NARRATIVE and any(j.priority == P_CRASH for j in list(self.queue._queue)):
             raise LLMUnavailable("shed: crash diagnosis has priority")
@@ -151,7 +198,7 @@ class Gateway:
                                   (task, priority, ref, now(), "queued")).lastrowid
         fut = asyncio.get_running_loop().create_future()
         await self.queue.put(_Job(priority, next(self._seq), task, messages, schema, max_tokens, timeout,
-                                  ref, call_id, fut))
+                                  ref, call_id, fut, temperature, on_delta))
         return await fut
 
     async def _worker(self) -> None:
@@ -175,12 +222,20 @@ class Gateway:
             self._finish(job, "unavailable", error="model server not healthy")
             raise LLMUnavailable("model server not healthy")
         last_error = None
+        stream = getattr(self.client, "chat_stream", None) if job.on_delta else None
+        extra = {"temperature": job.temperature} if job.temperature else {}
         for attempt in range(2):
             started = time.monotonic()
+            if attempt and job.on_delta:
+                job.on_delta(None)          # the listener drops what the failed attempt streamed
+            if stream:
+                call = lambda: stream(job.messages, job.schema, job.task, job.max_tokens, job.timeout,  # noqa: E731
+                                      job.on_delta, **extra)
+            else:
+                call = lambda: self.client.chat(job.messages, job.schema, job.task, job.max_tokens,  # noqa: E731
+                                                job.timeout, **extra)
             try:
-                resp = await asyncio.wait_for(
-                    asyncio.to_thread(self.client.chat, job.messages, job.schema, job.task, job.max_tokens, job.timeout),
-                    timeout=job.timeout + 5)
+                resp = await asyncio.wait_for(asyncio.to_thread(call), timeout=job.timeout + 5)
             except asyncio.TimeoutError:
                 self._finish(job, "timeout", error=f"exceeded {job.timeout}s")
                 raise LLMUnavailable("model call timed out")
@@ -195,6 +250,8 @@ class Gateway:
             except (json.JSONDecodeError, jsonschema.ValidationError) as exc:
                 last_error = f"invalid output: {str(exc)[:200]}"
                 continue
+            if job.on_delta and not stream:
+                job.on_delta(content)       # non-streaming client: deliver the whole answer at once
             self._finish(job, "ok", usage.get("prompt_tokens"), usage.get("completion_tokens"),
                          error=f"{time.monotonic() - started:.1f}s")
             return data

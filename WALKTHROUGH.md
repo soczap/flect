@@ -50,6 +50,7 @@ The rules that follow from this:
 
 - **The model proposes; plain code decides.** DeepSeek returns JSON that must match a schema. It has no
   tools, so it cannot run commands, merge, block or deploy. It can make a verdict stricter, never looser.
+  In the Flect AI console it can suggest an operator action from a fixed list; only your approval runs it.
 - **Every action goes through one function** (`Engine.act`). It checks the capability's mode and the GitHub
   write pause, then either does the action or records what it *would* have done. It writes an audit row
   either way.
@@ -343,6 +344,9 @@ Flect uses the local model for four jobs, served in this priority order:
 3. **VAPT summaries** (up to 30 minutes)
 4. **Incident narratives** (up to 5 minutes)
 
+Flect AI conversations queue with the same priority as PR reviews (up to 5 minutes per answer) and stream, so
+Flect starts speaking before it has finished thinking. Expect the first words after about 10 to 15 seconds.
+
 Guard rails:
 - loopback only, with no proxies and no redirects
 - at most 2 requests in flight, since the model's memory is shared
@@ -393,9 +397,14 @@ editing or deleting any entry breaks it. The dashboard's Audit log page checks t
 - **Secrets never leave the process.** Private keys, GitHub tokens, AWS keys, JWTs, bearer tokens,
   password-style settings and credentials in URLs are redacted from model prompts, GitHub text, logs and the
   dashboard.
-- **The dashboard can't change anything.** It only has read endpoints, listens on `127.0.0.1` only, and a test
-  fails if a write endpoint is ever added. Changes go through the `flect` command, over a Unix socket only
-  your user can open.
+- **The dashboard changes nothing on its own.** It listens on `127.0.0.1` only and answers only to loopback
+  host names (so a DNS-rebinding page cannot read it). Its only write endpoints are the Flect AI console's
+  (`/api/ai/*`, a test fails if any other appears); they need a per-start session token and a same-origin
+  request. Everything else goes through the `flect` command, over a Unix socket only your user can open.
+- **Flect AI cannot act by itself.** The model returns suggestions from a fixed catalog of ten operator
+  actions. Each one is validated against live state when proposed and again when you approve it, runs through
+  `Engine.act` (audited as `operator`, with who approved it), and expires after 6 hours if you never answer.
+  A plain "yes" or "no" is matched by code, not the model.
 - **Resilience.** Each of Flect's loops (logs, traffic, health, keys, GitHub, events, housekeeping,
   dashboard) is supervised: if one crashes it restarts with back-off instead of taking Flect down.
 
@@ -404,6 +413,23 @@ editing or deleting any entry breaks it. The dashboard's Audit log page checks t
 Open `http://127.0.0.1:1113` on the Spark (or tunnel the port to your laptop). It refreshes every 5 seconds,
 works offline, follows your system's light or dark theme (the sun and moon button switches it), and fits a
 phone screen. Press **Ctrl K** (⌘K on a Mac) to jump to any page, open incident or recent report.
+
+**Flect AI** is Flect you can talk to. Opening it starts a spoken briefing: the time-of-day greeting, whether
+production is safe, what happened since you were last here, and each issue that needs you with what Flect
+suggests. The Flect logo sits in a big circle and hops on every word it speaks; the caption under it follows
+along word by word. If nothing has changed since its last briefing, it just says so.
+- **Talk to it.** Type, or tap the logo (or the microphone) and speak. Tap the logo again, or press Esc, to
+  stop it talking. The speaker button mutes it; the settings button picks the voice, speed and your accent.
+- **Approve fixes.** Suggestions wait in *Waiting for your approval*, each with its risk and reason. Approve
+  or dismiss each one, or just say "yes", "go ahead", "fix those issues" (or "no"). Flect says what it is
+  starting and then reads out the result when the action finishes.
+- **What it can do:** re-run every key and service check, restart production, roll back to last known good,
+  retry a crash fix, block or unblock an IP, resolve an incident, change a guard's mode, pause or resume
+  GitHub writes. It says so plainly when a problem needs a human (a service Flect does not manage, a token to
+  rotate).
+- **Conversation** on the right keeps the whole history, with what became of every suggestion. If DeepSeek is
+  down, Flect still gives a short spoken status from its own data and can still run what you approve.
+- **The logo** is `web/public/flect-logo.png` (any square image; it is cropped to a circle).
 
 **Overview** answers "is production safe right now?"
 - A one-line verdict: *Production is protected*, *Production is up. One thing needs you*, or *Production is
@@ -476,7 +502,8 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 | `[target]` | VIGIL's directories, systemd units, URLs, log files, TLS certificates, and whether UAT runs on demand |
 | `[llm]` | model URL, requests in flight, per-task timeouts, output and prompt limits |
 | `[sandbox]` | memory, CPU, process and time limits |
-| `[dashboard]` | host and port |
+| `[dashboard]` | host, port, `allowed_hosts` (loopback names the dashboard answers to) |
+| `[ai]` | `enabled`, `history_messages` sent back to the model, `proposal_ttl_min` (suggestion lifetime), `lookup_rounds` |
 
 ## 17. What runs where
 
@@ -502,3 +529,7 @@ then `FLECT_*` environment variables (`FLECT_MODE_DOS=enforce`, `FLECT_DRY_RUN=1
 - Crashes with an environmental cause get a restart and a human, never a code change.
 - Without the privileged setup there is no sandbox, so the PR guard is static-only and never auto-merges,
   and fix-forward is skipped.
+- Flect AI uses the browser's speech. Local voices keep its words on your computer; "online" voices and voice
+  input go through the browser vendor's speech service (Google in Chrome, Microsoft in Edge). Typing and a
+  local voice keep everything on the network you control.
+- Flect AI answers can wait behind a long PR review: the model serves at most two requests at once.

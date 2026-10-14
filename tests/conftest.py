@@ -33,7 +33,7 @@ class FakeClient:
     def health(self, timeout=5):
         return self.healthy
 
-    def chat(self, messages, schema, name, max_tokens, timeout):
+    def chat(self, messages, schema, name, max_tokens, timeout, **_):
         self.calls.append({"messages": messages, "schema": schema, "name": name})
         content = self.responses.pop(0) if self.responses else "{}"
         if not isinstance(content, str):

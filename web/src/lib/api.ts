@@ -66,6 +66,7 @@ export interface Overview {
   reports_by_kind: Record<string, number>;
   rollbacks_24h: number;
   had_failure_1h: boolean;
+  ai_pending?: number;
   now: number;
 }
 

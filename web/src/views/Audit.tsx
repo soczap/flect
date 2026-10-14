@@ -16,7 +16,7 @@ const FILTERS: [Filter, string][] = [
 ];
 const match: Record<Filter, (a: Action) => boolean> = {
   all: () => true,
-  done: (a) => a.mode === "enforce" && a.ok !== 0,
+  done: (a) => (a.mode === "enforce" || a.mode === "operator") && a.ok !== 0,
   observe: (a) => a.mode === "observe",
   failed: (a) => a.ok === 0,
 };

@@ -8,7 +8,7 @@ from flect.server import build_app
 
 
 def client(cfg, db, live=None):
-    return TestClient(build_app(db, cfg, None, live=live))
+    return TestClient(build_app(db, cfg, None, live=live), base_url="http://127.0.0.1:1113")
 
 
 def test_index_stamps_assets_and_static_served(cfg, db):
@@ -48,7 +48,22 @@ def test_report_titles_and_path_confinement(cfg, db, tmp_path):
     assert c.get(f"/api/reports/{rid}").status_code == 403
 
 
-def test_dashboard_has_no_write_endpoints(cfg, db):
+def test_only_flect_ai_endpoints_accept_writes(cfg, db):
     app = build_app(db, cfg)
-    methods = {m for r in app.routes for m in getattr(r, "methods", set())}
-    assert methods <= {"GET", "HEAD"}
+    writes = {r.path for r in app.routes if getattr(r, "methods", set()) - {"GET", "HEAD"}}
+    assert writes and all(p.startswith("/api/ai/") for p in writes)
+
+
+def test_foreign_host_and_tokenless_writes_are_refused(cfg, db):
+    c = client(cfg, db)
+    assert c.get("/api/status").status_code == 200
+    assert c.get("/api/status", headers={"host": "evil.example:1113"}).status_code == 403    # DNS rebinding
+    assert c.get("/api/status", headers={"host": "[::1]:1113"}).status_code == 200
+    token = c.get("/api/ai/session").json()["token"]
+    assert c.post("/api/ai/actions/1/dismiss").status_code == 403                           # no token
+    assert c.post("/api/ai/actions/1/dismiss", headers={"x-flect-token": "nope"}).status_code == 403
+    assert c.post("/api/ai/actions/1/dismiss", headers={"x-flect-token": token,
+                                                        "origin": "http://localhost:3000"}).status_code == 403
+    # Past the guard: no assistant in this process.
+    assert c.post("/api/ai/actions/1/dismiss", headers={"x-flect-token": token,
+                                                        "origin": "http://127.0.0.1:1113"}).status_code == 503

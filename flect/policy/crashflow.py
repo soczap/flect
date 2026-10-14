@@ -52,7 +52,8 @@ class CrashFlows:
         elif latest["state"] == "healthy" and healthy and not latest["healthy_since"]:
             self.db.execute("UPDATE deployments SET healthy_since=? WHERE id=?", (now(), latest["id"]))
 
-    async def deploy_prod(self, sha: str, trigger: str, capability: str, incident_id: int | None = None):
+    async def deploy_prod(self, sha: str, trigger: str, capability: str, incident_id: int | None = None,
+                          by: str | None = None):
         async with self.deploy_lock["prod"]:
             previous = await asyncio.to_thread(self.prod.current_sha)
             if previous == sha and trigger != "restart":
@@ -60,7 +61,7 @@ class CrashFlows:
             self.deploying_until = time.time() + 600
             try:
                 result = await self.act(capability, f"deploy_prod:{trigger}", sha[:12], {"from": previous[:12], "to": sha[:12]},
-                                        lambda: asyncio.to_thread(self.prod.deploy, sha), incident_id)
+                                        lambda: asyncio.to_thread(self.prod.deploy, sha), incident_id, by=by)
             finally:
                 self.deploying_until = time.time() + 15
             if result is None:
@@ -68,11 +69,11 @@ class CrashFlows:
             state = "healthy" if result.ok else "failed"
             self.record_deployment("prod", sha, previous, trigger, state, result.detail)
         # Roll back outside the lock (asyncio.Lock is not re-entrant).
-        if not result.ok and trigger not in ("rollback",):
+        if not result.ok and trigger not in ("rollback", "operator_rollback"):
             lkg = rules.last_known_good(self.db)
             if lkg and lkg["sha"] != sha:
                 log.warning("deploy of %s failed (%s); rolling back to %s", sha[:12], result.detail, lkg["sha"][:12])
-                await self.deploy_prod(lkg["sha"], "rollback", capability, incident_id)
+                await self.deploy_prod(lkg["sha"], "rollback", capability, incident_id, by=by)
         return result
 
     # ── crash entry point ──────────────────────────────────────────────────
@@ -148,17 +149,18 @@ class CrashFlows:
             self.db.update_incident(incident_id, state="mitigated", summary="Restarted the service; health is green.")
 
     # ── fix-forward ────────────────────────────────────────────────────────
-    async def _fix_forward_safe(self, incident_id: int, tb, crashed_sha: str) -> None:
+    async def _fix_forward_safe(self, incident_id: int, tb, crashed_sha: str, force: bool = False) -> None:
         try:
-            await self.fix_forward(incident_id, tb, crashed_sha)
+            await self.fix_forward(incident_id, tb, crashed_sha, force)
         except Exception as exc:  # noqa: BLE001 — record on the incident instead of losing it
             log.exception("fix-forward for incident %s failed", incident_id)
             self.db.update_incident(incident_id, summary=f"Fix-forward error: {type(exc).__name__}: {exc}"[:400])
 
-    async def fix_forward(self, incident_id: int, tb, crashed_sha: str) -> None:
-        if self.mode("crash") == "off":
+    async def fix_forward(self, incident_id: int, tb, crashed_sha: str, force: bool = False) -> None:
+        """`force`: an operator asked for another attempt, so skip the off-mode and attempted-recently checks."""
+        if self.mode("crash") == "off" and not force:
             return
-        if rules.fix_attempted_recently(self.db, tb.signature):
+        if not force and rules.fix_attempted_recently(self.db, tb.signature):
             log.info("fix-forward for %s already attempted recently", tb.signature)
             return
         if self.sandbox is None:

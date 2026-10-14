@@ -17,11 +17,12 @@ from flect.db import DB, now
 from flect.policy import rules
 from flect.policy.cicd import CicdFlows
 from flect.policy.crashflow import CrashFlows
+from flect.policy.operator import OperatorActions
 
 log = logging.getLogger("flect.policy")
 
 
-class Engine(CrashFlows, CicdFlows):
+class Engine(CrashFlows, CicdFlows, OperatorActions):
     def __init__(self, cfg, db: DB, *, gateway=None, github=None, nft=None, prod=None, uat=None,
                  sandbox=None, notifier=None, clone=None, paths: dict | None = None,
                  test_argv: list[str] | None = None, sandbox_ro: list[str] | None = None):
@@ -54,26 +55,34 @@ class Engine(CrashFlows, CicdFlows):
         self.db.set("writes_paused", reason)
 
     async def act(self, capability: str, decision: str, target: str, params: dict, fn=None,
-                  incident_id: int | None = None, github_write: bool = False):
-        """Execute `fn` (sync or async) only in enforce mode; always audit."""
+                  incident_id: int | None = None, github_write: bool = False, by: str | None = None):
+        """Execute `fn` (sync or async) only in enforce mode, or when an operator approved it (`by`); always audit.
+
+        Operator-approved actions run whatever the capability's mode (modes govern what Flect does on its own)
+        and are audited with mode "operator" and who approved them. The GitHub write pause still applies.
+        """
         mode = self.mode(capability)
-        if mode == "off":
+        if mode == "off" and by is None:
             return None
+        if by is not None:
+            params = {**params, "approved_by": by}
         paused = self.writes_paused()
-        if mode != "enforce" or fn is None or (github_write and paused):
-            why = "observe" if mode != "enforce" else ("paused: " + paused if paused else "no-op")
+        executes = mode == "enforce" or by is not None
+        if not executes or fn is None or (github_write and paused):
+            why = "observe" if not executes else ("paused: " + paused if paused else "no-op")
             self.db.record_action(decision, target, params, "observe", None, f"would_do ({why})", incident_id)
             return None
+        ran_as = "operator" if by is not None else "enforce"
         try:
             result = fn()
             if asyncio.iscoroutine(result):
                 result = await result
-            self.db.record_action(decision, target, params, "enforce", True, str(result)[:500] if result is not None else "ok",
+            self.db.record_action(decision, target, params, ran_as, True, str(result)[:500] if result is not None else "ok",
                                   incident_id)
             return result if result is not None else True
         except Exception as exc:  # noqa: BLE001
             log.exception("action %s on %s failed", decision, target)
-            self.db.record_action(decision, target, params, "enforce", False, f"{type(exc).__name__}: {exc}"[:500],
+            self.db.record_action(decision, target, params, ran_as, False, f"{type(exc).__name__}: {exc}"[:500],
                                   incident_id)
             return None
 
